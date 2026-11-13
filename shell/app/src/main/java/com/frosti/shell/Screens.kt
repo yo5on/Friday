@@ -225,12 +225,10 @@ class TalkScreen(private val a: MainActivity) : Screen {
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(s: SeekBar, v: Int, user: Boolean) {
                         pct.text = "$v%"
-                        if (user && type == "volume") a.send(JSONObject().put("type", "volume").put("level", v))
+                        if (user) a.send(JSONObject().put("type", type).put("level", v))  // the Core applies only the newest brightness
                     }
                     override fun onStartTrackingTouch(s: SeekBar) {}
-                    override fun onStopTrackingTouch(s: SeekBar) {
-                        if (type == "brightness") a.send(JSONObject().put("type", "brightness").put("level", s.progress))
-                    }
+                    override fun onStopTrackingTouch(s: SeekBar) {}
                 })
                 box.addView(this, lp(-1, a.dp(40)))
             }
@@ -248,12 +246,15 @@ class TalkScreen(private val a: MainActivity) : Screen {
                 gravity = Gravity.CENTER_VERTICAL; setPadding(0, a.dp(10), 0, a.dp(10))
                 addView(a.text(15f, Ui.TEXT).apply { text = r.optString("name") }, lp(0, -2, 1f))
                 addView(a.label(r.optString("path"), Ui.DIM, 10f))
-            }.pressable { d.dismiss(); a.command("what's the github status of ${r.optString("path")}") })
+            }.pressable { d.dismiss(); openRepo(r.optString("path")) })
         }
         if ((repos?.length() ?: 0) == 0) box.addView(a.text(14f, Ui.DIM).apply { text = "No git folders found." })
         d = a.styled(android.app.AlertDialog.Builder(a, android.R.style.Theme_Material_Dialog_Alert)
             .setCustomTitle(a.dialogTitle("Laptop", Ui.ACCENT)).setView(ScrollView(a).apply { addView(box) }).create())
-        val h: (JSONObject) -> Unit = { m -> when (m.optString("type")) { "brightness" -> bright.progress = m.optInt("level"); "volume" -> vol.progress = m.optInt("level") } }
+        // replies for older levels arrive mid-drag; applying them made the thumb jump back, so a held slider ignores them
+        val h: (JSONObject) -> Unit = { m -> when (m.optString("type")) {
+            "brightness" -> if (!bright.isPressed) bright.progress = m.optInt("level")
+            "volume" -> if (!vol.isPressed) vol.progress = m.optInt("level") } }
         a.panel = h
         d.setOnDismissListener { if (a.panel === h) a.panel = null }  // runs after browse() may have taken over
         a.send(JSONObject().put("type", "brightness"))  // the current levels
@@ -271,13 +272,114 @@ class TalkScreen(private val a: MainActivity) : Screen {
         val arr = m.optJSONArray("dirs")
         val list = (0 until (arr?.length() ?: 0)).map { arr!!.getJSONObject(it) }
         val up = path.lastIndexOf('\\').takeIf { it > 0 }?.let { path.substring(0, it) }
-        val items = listOf("✓  Check GitHub status here") + listOfNotNull(up?.let { "↑  Up" }) +
+        val items = listOf("✓  Open git view here") + listOfNotNull(up?.let { "↑  Up" }) +
             list.map { (if (it.optBoolean("git")) "●  " else "    ") + it.optString("name") }
         a.choose("$path\\", items) { i ->
             when {
-                i == 0 -> a.command("what's the github status of $path\\")
+                i == 0 -> openRepo("$path\\")
                 up != null && i == 1 -> browse("$up\\")
                 else -> browse("$path\\" + list[i - (if (up != null) 2 else 1)].optString("name"))
+            }
+        }
+    }
+
+    // ---- git view for one folder: status, commit, pull/push/fetch, switch branch, commit graph ----
+    private var repoPath: String? = null
+    private var repoDialog: android.app.AlertDialog? = null
+    private var repoBox: LinearLayout? = null
+
+    private fun openRepo(path: String, extra: JSONObject = JSONObject()) {
+        var p = path.trimEnd('\\'); if (p.length == 2 && p[1] == ':') p += "\\"  // the form the Core sends back
+        repoPath = p
+        a.panel = { m -> if (m.optString("type") == "repo" && m.optString("path") == repoPath) showRepo(m) }
+        a.send(extra.put("type", "repo").put("path", p))
+    }
+
+    private fun repoAct(action: String, key: String? = null, value: String? = null) {
+        val path = repoPath ?: return
+        repoBox?.findViewWithTag<TextView>("note")?.apply { text = "$action…"; setTextColor(Ui.MUTED) }
+        openRepo(path, JSONObject().put("action", action).apply { if (key != null) put(key, value) })
+    }
+
+    private fun showRepo(m: JSONObject) {
+        val box = repoBox ?: a.vbox().apply { setPadding(a.dp(24), 0, a.dp(24), a.dp(12)) }.also { repoBox = it }
+        box.removeAllViews()
+        val err = m.optString("error"); val note = m.optString("note")
+        box.addView(a.text(12f, Ui.DIM).apply { text = m.optString("path"); typeface = android.graphics.Typeface.MONOSPACE })
+        if (err.isEmpty()) {  // status chips: branch, sync, changes
+            val chips = a.hbox()
+            fun chip(s: String, color: Int) = chips.addView(a.text(13f, color).apply {
+                text = s; maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+                background = pill(Ui.BG); setPadding(a.dp(11), a.dp(5), a.dp(11), a.dp(5))
+            }, lp(-2).margins(r = a.dp(6)))
+            val ahead = m.optInt("ahead"); val behind = m.optInt("behind"); val n = m.optInt("changed")
+            chip("⑂ " + m.optString("branch"), Ui.ACCENT)
+            chip(when { m.optString("upstream").isEmpty() -> "not on GitHub"; m.optBoolean("gone") -> "remote gone"
+                ahead + behind == 0 -> "in sync"; else -> listOfNotNull(if (ahead > 0) "↑$ahead" else null, if (behind > 0) "↓$behind" else null).joinToString(" ") }, Ui.MUTED)
+            chip(if (n > 0) "$n changed" else "clean", if (n > 0) Ui.AMBER else Ui.MUTED)
+            box.addView(android.widget.HorizontalScrollView(a).apply { isHorizontalScrollBarEnabled = false; addView(chips) }, lp().margins(t = a.dp(10)))
+        }
+        box.addView(a.text(13f, if (err.isNotEmpty() || Regex("failed|didn't|can't|cancelled", RegexOption.IGNORE_CASE).containsMatchIn(note)) Ui.AMBER else Ui.ACCENT)
+            .apply { tag = "note"; text = err.ifEmpty { note } }, lp().margins(t = a.dp(6)))
+        if (err.isEmpty()) {
+            val bar = a.hbox()  // action bar: four equal tiles, icon over label
+            fun tile(icon: String?, label: String, on: () -> Unit) = bar.addView(a.vbox().apply {
+                gravity = Gravity.CENTER; background = pill(Ui.BG, radius = a.dpf(12f)); setPadding(0, a.dp(10), 0, a.dp(10))
+                if (icon != null) addView(Icon(a, icon, Ui.TEXT), lp(a.dp(20), a.dp(20)))
+                addView(a.text(13f, Ui.TEXT).apply { text = label; gravity = Gravity.CENTER }, lp().margins(t = a.dp(4)))
+            }.pressable(on), lp(0, -2, 1f).margins(r = a.dp(6)))
+            tile("down", "Pull") { repoAct("pull") }; tile("up", "Push") { repoAct("push") }; tile("refresh", "Fetch") { repoAct("fetch") }
+            tile("search", "PRs & CI") { repoDialog?.dismiss(); a.command("what's the github status of ${m.optString("path")}") }
+            box.addView(bar, lp().margins(t = a.dp(10)))
+            fun card() = a.vbox().apply { background = pill(Ui.BG, radius = a.dpf(14f)); setPadding(a.dp(14), a.dp(12), a.dp(14), a.dp(12)) }
+                .also { box.addView(it, lp().margins(t = a.dp(10))) }
+            fun primary(parent: LinearLayout, label: String, color: Int, on: () -> Unit) = parent.addView(a.text(15f, Ui.TEXT).apply {
+                text = label; gravity = Gravity.CENTER; background = pill(color, a.dp(if (color == 0) 1 else 0), Ui.LINE, a.dpf(10f))
+                setPadding(0, a.dp(11), 0, a.dp(11))
+            }.pressable(on), lp().margins(t = a.dp(10)))
+            val changes = m.optJSONArray("changes"); val n = m.optInt("changed")
+            if (n > 0) card().apply {
+                addView(a.label("Changes", Ui.MUTED, 10f))
+                for (i in 0 until minOf(changes!!.length(), 6)) {
+                    val c = changes.optString(i); val k = when (c.take(2)) { "??", "A " -> "new"; " D", "D " -> "deleted"; else -> "edited" }
+                    addView(a.hbox().apply {
+                        addView(a.label(k, when (k) { "new" -> 0xFF788C5D.toInt(); "deleted" -> Ui.AMBER; else -> 0xFFC2A35A.toInt() }, 9.5f), lp(a.dp(62), -2))
+                        addView(a.text(13f, Ui.TEXT).apply { text = c.drop(3); maxLines = 1; ellipsize = TextUtils.TruncateAt.MIDDLE; typeface = android.graphics.Typeface.MONOSPACE })
+                    }, lp().margins(t = a.dp(6)))
+                }
+                if (n > 6) addView(a.text(12f, Ui.DIM).apply { text = "and ${n - 6} more" }, lp().margins(t = a.dp(4)))
+                primary(this, "Commit $n change${if (n == 1) "" else "s"}…", Ui.ACCENT) { a.prompt("Commit message", "What changed?") { repoAct("commit", "message", it) } }
+            }
+            val branches = m.optJSONArray("branches"); val names = (0 until (branches?.length() ?: 0)).map { branches!!.optString(it) }
+            card().apply {
+                addView(a.label("Branch", Ui.MUTED, 10f))
+                primary(this, "Switch branch…", 0) { a.choose("Switch branch", names) { i -> if (names[i] != m.optString("branch")) repoAct("switch", "branch", names[i]) } }
+            }
+            val rows = m.optJSONArray("graph")
+            box.addView(a.label("History", Ui.MUTED, 10f), lp().margins(t = a.dp(16), b = a.dp(6)))
+            val hist = card()
+            var lanes = 1
+            for (i in 0 until (rows?.length() ?: 0)) rows!!.getJSONObject(i).let { r -> listOf("up", "down", "pass_").forEach { k -> r.optJSONArray(k)?.let { arr -> for (j in 0 until arr.length()) lanes = maxOf(lanes, arr.optInt(j) + 1) } }; lanes = maxOf(lanes, r.optInt("lane") + 1) }
+            for (i in 0 until (rows?.length() ?: 0)) {
+                val r = rows!!.getJSONObject(i)
+                val refs = r.optJSONArray("refs"); val names2 = (0 until (refs?.length() ?: 0)).map { refs!!.optString(it) }
+                val shown = names2.filter { !(it.startsWith("origin/") && names2.contains(it.removePrefix("origin/"))) }.take(1)
+                hist.addView(a.hbox().apply {
+                    addView(GraphCell(a, r), lp(a.dp(18 + (lanes - 1) * 14), a.dp(34)))
+                    val laneColor = GraphCell.LANES[r.optInt("lane") % GraphCell.LANES.size]
+                    shown.forEach { addView(a.text(11f, laneColor).apply { text = it; maxLines = 1; ellipsize = TextUtils.TruncateAt.END; maxWidth = a.dp(120)
+                        background = pill(0, a.dp(1), laneColor); setPadding(a.dp(7), 0, a.dp(7), a.dp(1)) }, lp(-2).margins(l = a.dp(6))) }
+                    addView(a.text(14f, Ui.TEXT).apply { text = r.optString("subject"); maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, lp(0, -2, 1f).margins(l = a.dp(8)))
+                    addView(a.text(11f, Ui.DIM).apply { text = r.optString("when").replace(" ago", "") }, lp(-2).margins(l = a.dp(8)))
+                })
+            }
+        }
+        if (repoDialog?.isShowing != true) {
+            (box.parent as? android.view.ViewGroup)?.removeView(box)
+            repoDialog = a.styled(android.app.AlertDialog.Builder(a, android.R.style.Theme_Material_Dialog_Alert)
+                .setCustomTitle(a.dialogTitle(m.optString("name").ifEmpty { "Git" }, Ui.ACCENT)).setView(ScrollView(a).apply { addView(box) })
+                .setNegativeButton("Close", null).create()).apply {
+                setOnDismissListener { if (repoDialog === this) { repoPath = null; repoDialog = null; repoBox = null } }
             }
         }
     }

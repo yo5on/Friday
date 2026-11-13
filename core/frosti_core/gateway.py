@@ -28,9 +28,10 @@ import psutil
 import websockets
 from . import CONFIG, DATA
 from .brain import Brain, Session, sentences
-from .tools import PROJECTS, browse_start, git_repos, laptop_brightness, laptop_volume, list_dirs, media_session, now_playing, top_processes_cached
+from .tools import PROJECTS, browse_start, git_repos, laptop_brightness, laptop_volume, list_dirs, repo_info, media_session, now_playing, top_processes_cached
 
 MEDIA_ACTIONS = {"play", "pause", "next", "previous", "shuffle"}
+GIT_ACTIONS = {"commit", "pull", "push", "fetch", "switch"}  # the git view's buttons
 from .voice import Listener
 
 STARTED = time.time()
@@ -151,6 +152,22 @@ class PhoneSession(Session):
         if not ok:
             await self.send(type="notify", text=f"Spotify opened {query}, but I couldn't press play; tap the song there.")
 
+    async def repo(self, m):
+        """The Laptop panel's git view: run an action (same tiers and confirmation as a spoken one), then send fresh info."""
+        note = ""
+        if m.get("action") in GIT_ACTIONS:
+            args = {"project": m["path"], "action": m["action"]}
+            for k in ("message", "branch"):
+                if isinstance(m.get(k), str) and m[k].strip():
+                    args[k] = m[k].strip()
+            note, detail, _ = await self.brain.run_tool("git", args, self)
+            if detail and "failed" in note:
+                note += "\n" + detail[-400:]
+        try:
+            await self.send(type="repo", note=note, **await asyncio.to_thread(repo_info, m["path"]))
+        except OSError as e:
+            await self.send(type="repo", path=m["path"], error=str(e), note=note)
+
     async def run(self):
         tasks = set()
         def spawn(coro):  # long work runs beside the receive loop so audio/confirm frames keep flowing
@@ -195,8 +212,9 @@ class PhoneSession(Session):
                 except OSError as e:
                     print(f"[volume] {e}", flush=True)
             elif t == "brightness" and (m.get("level") is None or type(m.get("level")) is int and 0 <= m["level"] <= 100):
-                try:  # the Laptop panel's slider sets a level on release; no level just reads it (WMI via PowerShell: off the loop)
-                    await self.send(type="brightness", level=await asyncio.to_thread(laptop_brightness, m.get("level")))
+                try:  # the Laptop panel's slider sets levels as it moves; no level just reads it. None = a newer level took over
+                    if (level := await asyncio.to_thread(laptop_brightness, m.get("level"))) is not None:
+                        await self.send(type="brightness", level=level)
                 except OSError as e:
                     print(f"[brightness] {e}", flush=True)
             elif t == "dirs" and isinstance(m.get("path"), str):  # the Laptop panel's folder browser ("" = where it starts)
@@ -205,6 +223,8 @@ class PhoneSession(Session):
                     await self.send(type="dirs", path=str(Path(path)), dirs=await asyncio.to_thread(list_dirs, path))
                 except OSError as e:
                     await self.send(type="dirs", path=str(Path(path)), dirs=[], error=str(e))
+            elif t == "repo" and isinstance(m.get("path"), str) and Path(m["path"]).is_absolute():
+                spawn(self.repo(m))  # an action may wait on a confirm tap, which this loop must keep receiving
             elif t == "new":  # console "New chat": drop the follow-up context
                 self.brain.history = []
             elif t == "ptt" and self.listener:
@@ -335,6 +355,12 @@ async def serve(brain, voice):
     tok = token()
     brain.voice_loaded = voice is not None
     brain.now_playing = None
+    def warm():  # start the brightness PowerShell now, so the first slider move doesn't wait ~1 s for it
+        try:
+            laptop_brightness()
+        except OSError:
+            pass  # no built-in screen
+    asyncio.get_running_loop().run_in_executor(None, warm)
     brain.media_watch = asyncio.create_task(watch_media(brain))
     brain.media_watch.add_done_callback(lambda t: t.cancelled() or print(f"[media] watcher stopped: {t.exception()!r}", flush=True))
 

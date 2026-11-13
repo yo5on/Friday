@@ -94,6 +94,33 @@ class Meter(ctx: Context, private val warn: Boolean = true) : View(ctx) {
     }
 }
 
+/** One row of the git view's commit graph, from the Core's lane layout (lane, up, down, pass_); rows stack seamlessly. */
+class GraphCell(ctx: Context, private val row: org.json.JSONObject) : View(ctx) {
+    companion object { val LANES = intArrayOf(0xFFD97757.toInt(), 0xFF6A9BCC.toInt(), 0xFF788C5D.toInt(), 0xFFC2A35A.toInt(), 0xFFA98BD4.toInt(), 0xFFCC7FA0.toInt(), 0xFF5FA8A0.toInt()) }
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+    private val path = android.graphics.Path()
+    private fun ints(k: String) = row.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.optInt(it) } } ?: emptyList()
+    override fun onDraw(c: Canvas) {
+        val d = resources.displayMetrics.density; val w = 14 * d; val h = height.toFloat(); val mid = h / 2
+        fun x(i: Int) = 9 * d + i * w
+        fun col(i: Int) = LANES[i % LANES.size]
+        fun seg(x1: Float, y1: Float, x2: Float, y2: Float, color: Int) {
+            p.color = color; p.strokeWidth = 2 * d; path.reset(); path.moveTo(x1, y1)
+            if (x1 == x2) path.lineTo(x2, y2) else path.cubicTo(x1, (y1 + y2) / 2, x2, (y1 + y2) / 2, x2, y2)
+            c.drawPath(path, p)
+        }
+        val lane = row.optInt("lane")
+        ints("pass_").forEach { seg(x(it), 0f, x(it), h, col(it)) }
+        ints("up").forEach { seg(x(it), 0f, x(lane), mid, col(it)) }
+        ints("down").forEach { seg(x(lane), mid, x(it), h, col(it)) }
+        val head = row.optBoolean("head")
+        p.color = col(lane)
+        if (head) { p.style = Paint.Style.FILL; p.color = Ui.SURFACE; c.drawCircle(x(lane), mid, 5 * d, p); p.style = Paint.Style.STROKE; p.color = col(lane); p.strokeWidth = 2.5f * d; c.drawCircle(x(lane), mid, 5 * d, p) }
+        else { p.style = Paint.Style.FILL; c.drawCircle(x(lane), mid, 4 * d, p) }
+        p.style = Paint.Style.STROKE
+    }
+}
+
 /** Countdown ring: a faint full track and an arc for the share of time left (0..1), from 12 o'clock. */
 class Ring(ctx: Context) : View(ctx) {
     var value = 1f
@@ -180,6 +207,16 @@ class Icon(ctx: Context, kind: String, var color: Int = Ui.ACCENT) : View(ctx) {
                 c.drawLine(X(0.32f), Y(0.52f), X(0.45f), Y(0.65f), p); c.drawLine(X(0.45f), Y(0.65f), X(0.7f), Y(0.36f), p)
             }
             "search" -> { c.drawCircle(X(0.43f), Y(0.43f), s * 0.25f, p); c.drawLine(X(0.62f), Y(0.62f), X(0.84f), Y(0.84f), p) }
+            "down", "up" -> {  // git pull / push: an arrow onto (or off) a bar
+                val dn = kind == "down"; val bar = if (dn) 0.86f else 0.14f; val tip = if (dn) 0.66f else 0.34f; val tail = if (dn) 0.14f else 0.86f
+                c.drawLine(X(0.5f), Y(tail), X(0.5f), Y(tip), p)
+                c.drawLine(X(0.28f), Y(tip + if (dn) -0.2f else 0.2f), X(0.5f), Y(tip), p); c.drawLine(X(0.72f), Y(tip + if (dn) -0.2f else 0.2f), X(0.5f), Y(tip), p)
+                c.drawLine(X(0.18f), Y(bar), X(0.82f), Y(bar), p)
+            }
+            "refresh" -> {  // git fetch: an open circle with an arrowhead
+                val o = android.graphics.RectF(X(0.16f), Y(0.16f), X(0.84f), Y(0.84f)); c.drawArc(o, -60f, 300f, false, p)
+                c.drawLine(X(0.67f), Y(0.21f), X(0.84f), Y(0.21f), p); c.drawLine(X(0.67f), Y(0.21f), X(0.67f), Y(0.04f), p)
+            }
             "send" -> {
                 c.drawLine(X(0.2f), Y(0.5f), X(0.8f), Y(0.5f), p)
                 c.drawLine(X(0.58f), Y(0.28f), X(0.8f), Y(0.5f), p); c.drawLine(X(0.58f), Y(0.72f), X(0.8f), Y(0.5f), p)

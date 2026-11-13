@@ -253,7 +253,7 @@ class MainActivity : Activity() {
                 frosti.stats(m.optDouble("cpu").takeIf { !it.isNaN() }, ps?.optInt("battery", -1)?.takeIf { it >= 0 }, ps?.optBoolean("charging") == true) }
             "now_playing" -> { media = m.optJSONObject("media"); mediaAt = android.os.SystemClock.elapsedRealtime(); idleMedia() }
             "volume" -> { laptopVolume = m.optInt("level"); panel?.invoke(m); if (current != "music" && panel == null) showVolume("Laptop", laptopVolume) }  // Music and the panel have their own slider
-            "brightness", "dirs" -> panel?.invoke(m)
+            "brightness", "dirs", "repo" -> panel?.invoke(m)
             "activity" -> { val args = m.optJSONObject("args") ?: JSONObject()
                 frosti.activity(m.optString("name"), args)
                 if (m.optString("name") == "set_timer") startTimer(args.optDouble("minutes"), args.optString("label")) }

@@ -128,6 +128,38 @@ button.row:hover{background:var(--surface)}
 .lrow{display:grid;grid-template-columns:1fr auto;gap:6px 12px;margin-top:14px}
 .lrow input{grid-row:2;grid-column:1/-1;width:100%;accent-color:var(--cyan);cursor:pointer}
 #dialog{max-height:85vh;overflow-y:auto}
+/* git view */
+.dialog.wide{width:min(620px,calc(100vw - 32px))}
+.ghead{display:flex;align-items:flex-start;justify-content:space-between}
+.gname{font:400 24px/1.15 var(--serif);color:var(--text)}.gpath{font:12px var(--mono);color:var(--dim);margin-top:4px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;font:12.5px var(--thin);color:var(--text);background:var(--bg);border-radius:999px;padding:5px 11px}
+.chip svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.chip.br{color:var(--cyan);font-weight:600;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block}.chip.br svg{vertical-align:-2px;margin-right:6px}.chip.dim{color:var(--muted)}.chip.warn{color:var(--amber)}
+.gnote{font:13px/1.45 var(--thin);color:var(--cyan);margin-top:10px;white-space:pre-wrap;min-height:4px}.gnote.bad{color:var(--amber)}
+.gbar{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+.gbar button{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 4px;border-radius:12px;background:var(--bg);color:var(--text);font:12.5px var(--thin)}
+.gbar button:hover{background:#1f1e1d;color:var(--cyan)}
+.gbar svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.gcard{background:var(--bg);border-radius:14px;padding:14px;margin-top:12px}
+.gsub{font:500 10.5px var(--mono);letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.gfiles{font:12.5px/1.7 var(--mono);color:var(--text);max-height:120px;overflow:auto}
+.fk{display:inline-block;width:64px;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.fk.new,.fk.added{color:#788c5d}.fk.edited{color:#c2a35a}.fk.deleted{color:var(--amber)}
+.dialog textarea{width:100%;resize:vertical;background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:14px/1.4 var(--thin);margin-top:10px;outline:0}
+.dialog textarea:focus{border-color:var(--cyan-dim)}
+.gprimary{width:100%;margin-top:8px;padding:11px;border-radius:10px;background:var(--cyan);color:var(--text);font:600 14px var(--thin)}.gprimary:hover{background:#c6613f}
+.gform{display:flex;gap:8px}
+.gform select{flex:1;min-width:0;background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:9px 10px;font:14px var(--thin)}
+.gform button{padding:9px 16px;border-radius:10px;border:1px solid var(--line);color:var(--text);font:14px var(--thin)}.gform button:hover{border-color:var(--cyan)}
+.ggraph{background:var(--bg);border-radius:14px;padding:6px 10px;max-height:340px;overflow:auto}
+.grow{display:flex;align-items:center;gap:8px;height:30px}.grow svg{flex:none}
+.gmsg{min-width:0;flex:1;display:flex;align-items:baseline;gap:10px}
+.gsubj{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font:13.5px var(--thin);color:var(--text)}
+.gmeta{flex:none;font:11px var(--mono);color:var(--dim)}
+.ref{display:inline-block;max-width:45%;overflow:hidden;text-overflow:ellipsis;vertical-align:-4px;font:600 11px var(--thin);color:var(--c);border:1px solid var(--c);border-radius:999px;padding:0 7px;margin-right:6px;line-height:17px}
+.ref.remote{opacity:.6;font-weight:400}
+@media (max-width:520px){.gmeta{display:none}}
 /* performance tiles */
 .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;max-width:980px;margin-top:22px}
 .tile{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px 20px}
@@ -358,6 +390,7 @@ function onEvent(m) {
     case "volume": if (document.activeElement !== $("#mVol")) $("#mVol").value = m.level; lapLevel("lVol", m.level); break;  // don't fight a drag
     case "brightness": lapLevel("lBright", m.level); break;
     case "dirs": showDirs(m); break;
+    case "repo": showRepo(m); break;
     case "activity": ctl?.activity(m.name, m.args || {}); break;
     case "notify": ctl?.notify(); addMsg("notice", "Frosti · notice", m.text); break;
     case "confirm": confirmAction(m); break;
@@ -453,16 +486,66 @@ function laptopPanel() {
   const slider = (id, name) => `<label class="lrow"><span class="label">${name}</span><input type="range" id="${id}" min="0" max="100" aria-label="Laptop ${name.toLowerCase()}"><span class="label" id="${id}V">…</span></label>`;
   d.innerHTML = `<div class="label cyan" style="font-size:12px">Laptop</div>` + slider("lBright", "Brightness") + slider("lVol", "Volume") +
     `<div class="label" style="margin-top:18px">GitHub status</div><div class="qlist"><button class="row" id="lBrowse"><span class="t" style="color:var(--cyan)">Browse folders…</span></button>` +
-    (S.stats?.repos || []).map(r => `<button class="row" data-cmd="${esc(`what's the github status of ${r.path}`)}"><span class="t"><div>${esc(r.name)}</div><div class="label">${esc(r.path)}</div></span></button>`).join("") +
+    (S.stats?.repos || []).map(r => `<button class="row" data-repo="${esc(r.path)}"><span class="t"><div>${esc(r.name)}</div><div class="label">${esc(r.path)}</div></span></button>`).join("") +
     `</div><div class="btns"><button id="dlgNo">Close</button></div>`;
   $("#modal").classList.add("on"); closeModal.no = null;
   $("#dlgNo").onclick = closeModal; d.onkeydown = null;
-  $("#lBright").oninput = e => $("#lBrightV").textContent = e.target.value + "%";
-  $("#lBright").onchange = e => send({type: "brightness", level: +e.target.value});  // on release: each set is a PowerShell call on the laptop
+  $("#lBright").oninput = e => { $("#lBrightV").textContent = e.target.value + "%"; send({type: "brightness", level: +e.target.value}); };  // the Core applies only the newest
   $("#lVol").oninput = e => { $("#lVolV").textContent = e.target.value + "%"; send({type: "volume", level: +e.target.value}); };
   $("#lBrowse").onclick = () => browse("");
-  d.onclick = e => { if (e.target.closest("[data-cmd]")) closeModal(); };
+  d.onclick = e => { const r = e.target.closest("[data-repo]"); if (r) openRepo(r.dataset.repo); };
+  S.repo = null;
   send({type: "brightness"}); send({type: "volume", step: 0});  // the current levels
+}
+// git view for one folder: status, commit, pull/push/fetch, switch branch, commit graph
+function openRepo(path, extra = {}) {
+  path = path.replace(/\\+$/, ""); if (/^[a-z]:$/i.test(path)) path += "\\";  // same form the Core sends back (a drive root keeps its \)
+  S.repo = path; S.browsing = false; send({type: "repo", path, ...extra}); if (extra.action) repoBusy(extra.action); }
+function repoBusy(what) { const n = $("#gNote"); if (n) { n.className = "label"; n.textContent = `${what}…`; } }
+function showRepo(m) {
+  if (S.repo !== m.path) return;  // closed, or another folder opened since
+  const d = $("#dialog"); d.className = "dialog"; $("#modal").classList.add("on"); closeModal.no = null;
+  d.classList.add("wide");
+  const fail = /failed|didn't|can't|cancelled/i.test(m.note || "") || m.error, ic = p => `<svg viewBox="0 0 24 24"><path d="${p}"/></svg>`;
+  const kind = s => ({"??": "new", " M": "edited", "M ": "edited", "MM": "edited", " D": "deleted", "D ": "deleted", "A ": "added", "R ": "renamed"})[s.slice(0, 2)] || s.slice(0, 2).trim();
+  d.innerHTML = `<div class="ghead"><div><div class="gname">${esc(m.name || m.path)}</div><div class="gpath">${esc(m.path)}</div></div></div>` +
+    (m.error ? "" : `<div class="chips"><span class="chip br">${ic("M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9")}${esc(m.branch)}</span>` +
+      (m.ahead ? `<span class="chip">↑ ${m.ahead} to push</span>` : "") + (m.behind ? `<span class="chip">↓ ${m.behind} to pull</span>` : "") +
+      (!m.upstream ? `<span class="chip dim">not on GitHub yet</span>` : m.gone ? `<span class="chip warn">remote branch gone</span>` : !m.ahead && !m.behind ? `<span class="chip dim">in sync</span>` : "") +
+      `<span class="chip ${m.changed ? "warn" : "dim"}">${m.changed ? `${m.changed} changed` : "clean"}</span></div>`) +
+    `<div class="gnote ${fail ? "bad" : ""}" id="gNote">${esc(m.error || m.note || "")}</div>` +
+    (m.error ? "" : `<div class="gbar">
+      <button data-g="pull">${ic("M12 4v12m0 0-5-5m5 5 5-5M5 20h14")}Pull</button><button data-g="push">${ic("M12 20V8m0 0-5 5m5-5 5 5M5 4h14")}Push</button>
+      <button data-g="fetch">${ic("M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5")}Fetch</button><button id="gHub">${ic("M9 19c-4 1.5-4-2-6-2.5m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1-.3-3.4 1.3a11.6 11.6 0 0 0-6 0C6.8 2.1 5.8 2.4 5.8 2.4a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4.4 8.8c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21")}PRs &amp; CI</button></div>` +
+      (m.changed ? `<div class="gcard"><div class="gsub">Changes</div><div class="gfiles">${m.changes.map(c => `<div><span class="fk ${kind(c)}">${esc(kind(c))}</span>${esc(c.slice(3))}</div>`).join("")}</div>
+        <textarea id="gMsg" rows="2" placeholder="Commit message"></textarea><button class="gprimary" id="gCommit">Commit ${m.changed} change${m.changed === 1 ? "" : "s"}</button></div>` : "") +
+      `<div class="gcard"><div class="gsub">Branch</div><div class="gform"><select id="gBranch" aria-label="Branch">${m.branches.map(b => `<option ${b === m.branch ? "selected" : ""}>${esc(b)}</option>`).join("")}</select><button id="gSwitch">Switch</button></div></div>
+      <div class="gsub" style="margin-top:18px">History</div><div class="ggraph">${graphRows(m.graph)}</div>`) +
+    `<div class="btns"><button id="dlgBack">Back</button><button id="dlgNo">Close</button></div>`;
+  $("#dlgNo").onclick = () => { S.repo = null; closeModal(); }; $("#dlgBack").onclick = laptopPanel; d.onkeydown = null;
+  d.onclick = e => { const g = e.target.closest("[data-g]"); if (g) openRepo(m.path, {action: g.dataset.g}); };
+  if (m.error) return;
+  $("#gHub").onclick = () => { S.repo = null; closeModal(); command(`what's the github status of ${m.path}`, false); };
+  if (m.changed) {
+    $("#gCommit").onclick = () => { const msg = $("#gMsg").value.trim(); if (msg) openRepo(m.path, {action: "commit", message: msg}); else $("#gMsg").focus(); };
+    $("#gMsg").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#gCommit").click(); } };
+  }
+  $("#gSwitch").onclick = () => { const b = $("#gBranch").value; if (b !== m.branch) openRepo(m.path, {action: "switch", branch: b}); };
+}
+// commit graph: one SVG strip per row, drawn from the Core's lane layout (lines meet across rows)
+const LANE = ["#d97757", "#6a9bcc", "#788c5d", "#c2a35a", "#a98bd4", "#cc7fa0", "#5fa8a0"];
+function graphRows(rows) {
+  const W = 14, H = 30, x = i => 9 + i * W, mid = H / 2, col = i => LANE[i % LANE.length];
+  const width = x(Math.max(0, ...rows.flatMap(r => [r.lane, ...r.up, ...r.down, ...r.pass_]))) + 9;
+  return rows.map(r => {
+    const seg = (x1, y1, x2, y2, c) => x1 === x2 ? `<path d="M${x1} ${y1}V${y2}" stroke="${c}"/>` : `<path d="M${x1} ${y1}C${x1} ${(y1 + y2) / 2} ${x2} ${(y1 + y2) / 2} ${x2} ${y2}" stroke="${c}"/>`;
+    const svg = r.pass_.map(i => seg(x(i), 0, x(i), H, col(i))).join("") + r.up.map(i => seg(x(i), 0, x(r.lane), mid, col(i))).join("") +
+      r.down.map(j => seg(x(r.lane), mid, x(j), H, col(j))).join("") +
+      `<circle cx="${x(r.lane)}" cy="${mid}" r="${r.head ? 5 : 4}" fill="${r.head ? "var(--surface)" : col(r.lane)}" stroke="${col(r.lane)}" stroke-width="${r.head ? 2.5 : 0}"/>`;
+    const refs = r.refs.filter(f => !(f.startsWith("origin/") && r.refs.includes(f.slice(7)))).map(f => `<span class="ref ${f.startsWith("origin/") ? "remote" : ""}" style="--c:${col(r.lane)}">${esc(f.replace(/^tag: /, "🏷 "))}</span>`).join("");
+    return `<div class="grow"><svg width="${width}" height="${H}" fill="none" stroke-width="2">${svg}</svg>` +
+      `<div class="gmsg"><div class="gsubj">${refs}<span title="${esc(r.subject)}">${esc(r.subject)}</span></div><div class="gmeta">${esc(r.sha)} · ${esc(r.when)}</div></div></div>`;
+  }).join("");
 }
 function lapLevel(id, v) { const el = $("#" + id); if (el && document.activeElement !== el) { el.value = v; $("#" + id + "V").textContent = v + "%"; } }
 function browse(path) { S.browsing = true; send({type: "dirs", path}); }
@@ -470,13 +553,13 @@ function showDirs(m) {  // one list per folder; ● marks git folders
   if (!S.browsing || !$("#modal").classList.contains("on")) return;
   const d = $("#dialog"), path = m.path.replace(/\\$/, ""), i = path.lastIndexOf("\\"), up = i > 0 ? path.slice(0, i) + "\\" : null;
   d.innerHTML = `<div class="label cyan" style="font-size:12px">${esc(path)}\\</div><div class="qlist">` +
-    `<button class="row" data-cmd="${esc(`what's the github status of ${path}\\`)}"><span class="t" style="color:var(--cyan)">✓ Check GitHub status here</span></button>` +
+    `<button class="row" data-repo="${esc(path + "\\")}"><span class="t" style="color:var(--cyan)">✓ Open git view here</span></button>` +
     (up ? `<button class="row" data-dir="${esc(up)}"><span class="t">↑ Up</span></button>` : "") +
     (m.error ? `<div class="label amber">${esc(m.error)}</div>` : "") +
     m.dirs.map(f => `<button class="row" data-dir="${esc(path + "\\" + f.name)}"><span class="t">${f.git ? "● " : ""}${esc(f.name)}</span></button>`).join("") +
     `</div><div class="btns"><button id="dlgBack">Back</button><button id="dlgNo">Close</button></div>`;
   $("#dlgNo").onclick = closeModal; $("#dlgBack").onclick = laptopPanel;
-  d.onclick = e => { const b = e.target.closest("[data-dir]"); if (b) browse(b.dataset.dir); else if (e.target.closest("[data-cmd]")) closeModal(); };
+  d.onclick = e => { const b = e.target.closest("[data-dir]"), r = e.target.closest("[data-repo]"); if (b) browse(b.dataset.dir); else if (r) openRepo(r.dataset.repo); };
 }
 $("#lapBtn").onclick = laptopPanel;
 $("#form").onsubmit = e => { e.preventDefault(); const t = $("#cmd").value.trim(); if (t) { command(t, false); $("#cmd").value = ""; } };

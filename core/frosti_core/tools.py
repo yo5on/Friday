@@ -169,16 +169,19 @@ def open_vscode(path):
     subprocess.Popen([code, path], creationflags=NO_WINDOW)
     return f"Opening {Path(path).name} in VS Code.", path
 
-def git(project_name, action, message=None):
+def git(project_name, action, message=None, branch=None):
     p = Path(project_name or "")
-    if action == "github" and p.is_absolute() and p.is_dir():  # read-only, so any folder picked in the + menu is fine
-        return github_status(p.name, p)
-    name, path = project(project_name)
+    # a folder picked in the Laptop panel; tiers and confirmation are the same as for a configured project
+    name, path = (p.name or str(p), p) if p.is_absolute() and p.is_dir() else project(project_name)
     cmds = {"status": ["git", "status", "-sb"], "log": ["git", "log", "--oneline", "-5"], "diff": ["git", "diff", "--stat"],
-            "pull": ["git", "pull", "--ff-only"], "push": ["git", "push"]}
+            "pull": ["git", "pull", "--ff-only"], "push": ["git", "push"], "fetch": ["git", "fetch", "--all", "--prune"]}
     if action == "github":
         return github_status(name, path)
-    if action == "commit":
+    if action == "switch":
+        if not branch or branch.startswith("-"):
+            return "Which branch?", ""
+        rc, out = sh(["git", "switch", branch], path, timeout=60)
+    elif action == "commit":
         if not message:
             return "What should the commit message be?", ""
         sh(["git", "add", "-A"], path)
@@ -197,6 +200,8 @@ def git(project_name, action, message=None):
         spoken = f"Latest in {name}: " + "; ".join(l.split(" ", 1)[1] for l in lines[:3]) + "."
     elif action == "diff":
         spoken = lines[-1] if lines else "No uncommitted changes."
+    elif action == "switch":
+        spoken = f"{name} is now on {branch}."
     else:
         spoken = f"git {action} done for {name}."
     return spoken, out
@@ -238,6 +243,58 @@ def browse_start():
     for v in PROJECTS.values():
         return Path(v["path"]).anchor or str(Path.home())
     return str(Path.home())
+
+def repo_info(path):
+    """What the Laptop panel's git view shows: branch, ahead/behind, changed files, local branches and a commit graph."""
+    p = Path(path)
+    rc, out = sh(["git", "status", "--porcelain=v1", "-b"], p, timeout=20)
+    if rc != 0:
+        raise OSError(out.splitlines()[0] if out else "not a git folder")
+    head, *changes = out.splitlines()
+    m = re.match(r"## (?:No commits yet on )?(\S+?)(?:\.\.\.(\S+))?(?: \[(.*)\])?$", head)
+    _, branches = sh(["git", "branch", "--format=%(refname:short)"], p, timeout=20)
+    track = (m[3] if m else None) or ""
+    ahead, behind = (int(x[1]) if (x := re.search(rf"{w} (\d+)", track)) else 0 for w in ("ahead", "behind"))
+    return dict(path=str(p), name=p.name or str(p), branch=m[1] if m else head[3:], upstream=(m[2] if m else None) or "",
+                ahead=ahead, behind=behind, gone="gone" in track, changes=changes[:50], changed=len(changes),
+                branches=branches.splitlines()[:50], graph=commit_graph(p))
+
+def commit_graph(path, n=40):
+    """The last `n` commits of all branches laid out in lanes, ready to draw row by row:
+    lane = the dot's column; up = lanes whose line runs from the row's top into the dot; down = lanes the dot's lines
+    run to at the row's bottom (its parents); pass = lanes that run straight through. Lanes keep their column."""
+    rc, out = sh(["git", "log", "--all", "--topo-order", "-n", str(n), "--format=%H%x1f%P%x1f%D%x1f%s%x1f%cr"], path, timeout=20)
+    if rc != 0:
+        return []
+    lanes, rows = [], []
+    for line in out.splitlines():
+        sha, parents, refs, subject, when = (line.split("\x1f") + [""] * 5)[:5]
+        parents = parents.split()
+        up = [i for i, v in enumerate(lanes) if v == sha]
+        lane = up[0] if up else (lanes.index(None) if None in lanes else len(lanes))
+        if lane == len(lanes):
+            lanes.append(None)
+        through = [i for i, v in enumerate(lanes) if v is not None and v != sha]
+        for i in up:
+            lanes[i] = None
+        down = []
+        for k, par in enumerate(parents):
+            if k == 0:
+                j = lane
+            elif par in lanes:
+                j = lanes.index(par)
+            else:
+                j = next((i for i, v in enumerate(lanes) if v is None and i != lane), len(lanes))
+                if j == len(lanes):
+                    lanes.append(None)
+            lanes[j] = par
+            down.append(j)
+        while lanes and lanes[-1] is None:
+            lanes.pop()
+        rows.append(dict(sha=sha[:7], subject=subject, when=when, lane=lane, up=up, down=down, pass_=through,
+                         refs=[r.replace("HEAD -> ", "") for r in refs.split(", ") if r and r != "origin/HEAD"],
+                         head="HEAD ->" in refs or refs == "HEAD"))
+    return rows
 
 def github_status(name, path):
     """Branch, local changes and ahead/behind from git; open PRs and the latest CI run from the gh CLI."""
@@ -352,19 +409,50 @@ def _call(obj, slot, *args):
     types = (type(a) if hasattr(type(a), "from_param") else ctypes.c_void_p for a in args)  # byref() args are pointers
     return ctypes.WINFUNCTYPE(ctypes.HRESULT, ctypes.c_void_p, *types)(vtbl[slot])(obj, *args)
 
+# One PowerShell kept running for brightness: starting one per change took ~1 s, so a dragged slider lagged.
+# It reads "get" or a level per line and answers with the level (or "ERR ...").
+BRIGHT_PS = r"""$ErrorActionPreference = 'Stop'
+while ($null -ne ($l = [Console]::In.ReadLine())) {
+  try {
+    if ($l -eq 'get') { $v = (Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightness | Select-Object -First 1).CurrentBrightness }
+    else { if (-not $m) { $m = Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods | Select-Object -First 1 }
+           $null = Invoke-CimMethod -InputObject $m -MethodName WmiSetBrightness -Arguments @{Timeout = [uint32]0; Brightness = [byte]$l}; $v = $l }
+    [Console]::Out.WriteLine("$v")
+  } catch { [Console]::Out.WriteLine("ERR $($_.Exception.Message)") }
+  [Console]::Out.Flush()
+}"""
+_bright = {"proc": None, "lock": threading.Lock(), "want": None}
+
+def _bright_ask(line):
+    p = _bright["proc"]
+    if p is None or p.poll() is not None:
+        p = _bright["proc"] = subprocess.Popen(["powershell", "-NoProfile", "-Command", BRIGHT_PS], stdin=subprocess.PIPE,
+                                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1,
+                                               creationflags=NO_WINDOW)
+    p.stdin.write(line + "\n"); p.stdin.flush()
+    out = p.stdout.readline().strip()
+    if not out.isdigit():
+        raise OSError(f"brightness: {out[:200] or 'no answer'}")
+    return int(out)
+
 def laptop_brightness(level=None):
-    """Set the built-in screen to `level` 0-100 (None just reads it) through WMI; returns the level.
-    Raises OSError where unsupported (external monitors)."""
+    """Set the built-in screen to `level` 0-100 (None just reads it) through WMI; returns the level, or None when a set
+    already running will apply this newer level (so a dragged slider never queues up). Raises OSError where unsupported."""
     if level is None:
-        ps = "(Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightness -ErrorAction Stop | Select-Object -First 1).CurrentBrightness"
-    else:
-        level = max(0, min(100, int(level)))
-        ps = (f"Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods -ErrorAction Stop | "
-              f"Invoke-CimMethod -MethodName WmiSetBrightness -Arguments @{{Timeout=0; Brightness={level}}} | Out-Null; {level}")
-    rc, out = sh(["powershell", "-NoProfile", "-Command", ps], timeout=20)
-    if rc != 0 or not out.strip().isdigit():
-        raise OSError(f"brightness: {out[:200]}")
-    return int(out.strip())
+        with _bright["lock"]:
+            return _bright_ask("get")
+    _bright["want"] = max(0, min(100, int(level)))
+    cur = None
+    while _bright["want"] is not None:  # re-check after release: a level that arrived just then still gets applied
+        if not _bright["lock"].acquire(blocking=False):
+            return cur
+        try:
+            while (lv := _bright["want"]) is not None:
+                _bright["want"] = None
+                cur = _bright_ask(str(lv))
+        finally:
+            _bright["lock"].release()
+    return cur
 
 def set_laptop_brightness(level):
     try:
@@ -624,7 +712,7 @@ def describe_screen(device="laptop"):
 
 S, I = {"type": "string"}, {"type": "integer"}
 DEV = {"type": "string", "enum": ["phone", "laptop"]}
-GIT_TIER = {"status": 0, "github": 0, "log": 0, "diff": 0, "pull": 1, "commit": 2, "push": 3}
+GIT_TIER = {"status": 0, "github": 0, "log": 0, "diff": 0, "fetch": 0, "pull": 1, "switch": 1, "commit": 2, "push": 3}
 
 TOOLS = {t.name: t for t in [
     Tool("open_app", "Open an app on the phone or laptop", {"name": S, "device": DEV}, ["name", "device"], 1,
@@ -637,8 +725,9 @@ TOOLS = {t.name: t for t in [
     Tool("set_volume", "Set phone media volume percent", {"level": I}, ["level"], 1),
     Tool("open_vscode", "Open a folder in VS Code on the laptop", {"path": S}, ["path"], 1, open_vscode),
     Tool("git", "Run a read-only or commit git action in a project",
-         {"project": S, "action": {"type": "string", "enum": list(GIT_TIER)}, "message": S}, ["project", "action"],
-         lambda a: GIT_TIER.get(a.get("action"), 3), lambda project, action, message=None: git(project, action, message)),
+         {"project": S, "action": {"type": "string", "enum": list(GIT_TIER)}, "message": S, "branch": S}, ["project", "action"],
+         lambda a: GIT_TIER.get(a.get("action"), 3),
+         lambda project, action, message=None, branch=None: git(project, action, message, branch)),
     Tool("run_project", "Run a project's configured task",
          {"project": S, "task": {"type": "string", "enum": ["dev", "test", "build"]}}, ["project", "task"], 1,
          lambda project, task: run_project(project, task)),
