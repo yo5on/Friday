@@ -51,6 +51,8 @@ class MainActivity : Activity() {
     var stats: JSONObject? = null; private set
     var media: JSONObject? = null; private set  // what the laptop plays; mediaAt: when it arrived (elapsedRealtime)
     var mediaAt = 0L; private set
+    var laptopVolume = -1; private set  // last level the Core reported; -1 = not yet
+    var panel: ((JSONObject) -> Unit)? = null  // the open Laptop panel takes brightness and volume replies
     var micOk = true; private set
 
     private val cores = mutableListOf<CoreView>()
@@ -157,6 +159,7 @@ class MainActivity : Activity() {
         hideIdle(); cores.clear(); navItems.clear()
         setContentView(build())
         setLink(linked, null); setState(coreState)
+        screens[current]?.onShow()  // the rebuilt screen never went through go(): start its clock and volume read
     }
 
     /**
@@ -249,7 +252,8 @@ class MainActivity : Activity() {
             "stats" -> { stats = m; val ps = m.optJSONObject("phone_stats")
                 frosti.stats(m.optDouble("cpu").takeIf { !it.isNaN() }, ps?.optInt("battery", -1)?.takeIf { it >= 0 }, ps?.optBoolean("charging") == true) }
             "now_playing" -> { media = m.optJSONObject("media"); mediaAt = android.os.SystemClock.elapsedRealtime(); idleMedia() }
-            "volume" -> if (current != "music") showVolume("Laptop", m.optInt("level"))  // Music has its own slider
+            "volume" -> { laptopVolume = m.optInt("level"); panel?.invoke(m); if (current != "music" && panel == null) showVolume("Laptop", laptopVolume) }  // Music and the panel have their own slider
+            "brightness", "dirs" -> panel?.invoke(m)
             "activity" -> { val args = m.optJSONObject("args") ?: JSONObject()
                 frosti.activity(m.optString("name"), args)
                 if (m.optString("name") == "set_timer") startTimer(args.optDouble("minutes"), args.optString("label")) }
@@ -309,17 +313,23 @@ class MainActivity : Activity() {
     // shortcut: shows only the newest timer and forgets it on restart; the Clock app keeps them all (a tap opens it)
     private var timerDue = 0L  // elapsedRealtime when it rings; 0 = none
     private var timerName = ""
+    private var timerTotal = 1L  // ms, for the ring
     private lateinit var timerBox: View
+    private lateinit var timerRing: Ring
     private lateinit var timerLeft: TextView
     private lateinit var timerLabel: TextView
     private val timerTick = Runnable { tickTimer() }
 
+    // a slim chip: ring that empties as time runs out, the time, then the label; one line so it sits in the header band
     private fun buildTimer(): View {
-        timerLabel = label("", Ui.ACCENT, 9.5f).apply { isSingleLine = true }; timerLeft = text(30f, Ui.TEXT, Ui.THIN)
+        timerRing = Ring(this)
+        timerLeft = text(20f, Ui.TEXT).apply { fontFeatureSettings = "tnum" }  // fixed-width digits: the chip doesn't twitch each second
+        timerLabel = label("", Ui.MUTED, 10f).apply { isSingleLine = true }
         timerBox = hbox().apply {
-            background = pill(Ui.SURFACE, dp(1), Ui.LINE, dpf(16f)); setPadding(dp(14), dp(10), dp(20), dp(10)); visibility = View.GONE
-            addView(Icon(this@MainActivity, "timer", Ui.ACCENT), lp(dp(26), dp(26)).margins(r = dp(12)))
-            addView(vbox().apply { addView(timerLabel, lp(-2, -2)); addView(timerLeft, lp(-2, -2).margins(t = dp(3))) })
+            background = pill(Ui.RAIL, dp(1), Ui.LINE); elevation = dpf(6f); setPadding(dp(8), dp(6), dp(18), dp(6)); visibility = View.GONE
+            addView(timerRing, lp(dp(28), dp(28)).margins(r = dp(10)))
+            addView(timerLeft, lp(-2, -2))
+            addView(timerLabel, lp(-2, -2).margins(l = dp(10)))
         }.pressable { showTimers() }
         tickTimer()
         return timerBox
@@ -328,18 +338,23 @@ class MainActivity : Activity() {
     /** Shows the countdown for a timer just set, by voice (the Core's set_timer activity) or by a tap. */
     fun startTimer(minutes: Double, label: String) {
         if (minutes.isNaN() || minutes <= 0) return
-        timerDue = android.os.SystemClock.elapsedRealtime() + (minutes * 60_000).toLong(); timerName = label
+        timerTotal = (minutes * 60_000).toLong().coerceAtLeast(1)
+        timerDue = android.os.SystemClock.elapsedRealtime() + timerTotal; timerName = label
         tickTimer()
     }
 
     private fun tickTimer() {
         h.removeCallbacks(timerTick)
-        val left = Math.ceil((timerDue - android.os.SystemClock.elapsedRealtime()) / 1000.0).toLong()
+        val ms = timerDue - android.os.SystemClock.elapsedRealtime()
+        val left = Math.ceil(ms / 1000.0).toLong()
         if (timerDue == 0L || left < -30) { timerDue = 0; timerBox.visibility = View.GONE; return }  // "Done" stays up 30 s
         timerBox.visibility = View.VISIBLE
-        timerLabel.text = ((if (left <= 0) "Done" else "Timer") + if (timerName.isBlank()) "" else " · $timerName").uppercase()
-        timerLeft.text = if (left <= 0) "0:00" else if (left >= 3600) "%d:%02d:%02d".format(left / 3600, left % 3600 / 60, left % 60)
+        val done = left <= 0
+        timerRing.color = if (done) Ui.AMBER else Ui.ACCENT; timerRing.value = if (done) 1f else ms.toFloat() / timerTotal
+        timerLeft.setTextColor(if (done) Ui.AMBER else Ui.TEXT)
+        timerLeft.text = if (done) "Done" else if (left >= 3600) "%d:%02d:%02d".format(left / 3600, left % 3600 / 60, left % 60)
             else "%d:%02d".format(left / 60, left % 60)
+        timerLabel.text = timerName.uppercase(); timerLabel.visibility = if (timerName.isBlank()) View.GONE else View.VISIBLE
         h.postDelayed(timerTick, 1000)
     }
 
@@ -406,7 +421,7 @@ class MainActivity : Activity() {
         return d
     }
 
-    private fun dialogTitle(s: String, color: Int) = label(s, color, 12f).apply { setPadding(dp(24), dp(22), dp(24), dp(4)) }
+    fun dialogTitle(s: String, color: Int) = label(s, color, 12f).apply { setPadding(dp(24), dp(22), dp(24), dp(4)) }
 
     fun prompt(title: String, hint: String, numeric: Boolean = false, onOk: (String) -> Unit) {
         val input = EditText(this).apply {
@@ -537,7 +552,7 @@ class MainActivity : Activity() {
         root.addView(buildIdle())
         root.addView(buildVolume(), FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(16) })
         root.addView(buildTimer(), FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply {
-            topMargin = dp(if (portrait) 56 else 16); rightMargin = dp(16) })  // portrait: below the header
+            topMargin = dp(if (portrait) 52 else 12); rightMargin = dp(12) })  // portrait: below the header
         return root
     }
 

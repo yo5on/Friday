@@ -63,7 +63,11 @@ def match(text):
         return "run_project", {"project": proj, "task": task}
     if proj and re.fullmatch(rf"build {proj}", t):
         return "run_project", {"project": proj, "task": "build"}
+    if m := re.search(r"\bgit ?hub status (?:of|for) ([a-z]:[\\/].*)$", t):  # a folder picked in the + menu
+        return "git", {"project": m[1], "action": "github"}
     if proj:
+        if re.search(r"\bgit ?hub\b|\b(pull requests?|prs?|ci|checks)\b", t) and not re.search(r"\bpush\b", t):
+            return "git", {"project": proj, "action": "github"}
         if re.search(r"\bgit status\b|\bstatus (of|for)\b", t):
             return "git", {"project": proj, "action": "status"}
         if re.search(r"\b(recent )?commits\b|\bgit log\b", t) and "commit " + proj not in t:
@@ -78,9 +82,9 @@ def match(text):
         if not re.search(r"\b(server|timer|tests?|build)\b", m[1]):
             return "open_app", {"name": m[1], "device": device_of(m[2] or "", "phone")}
     if m := re.search(r"\bbrightness\b.*?(\d{1,3})|(\d{1,3}) ?%? ?(?:percent )?brightness", t):
-        return "set_brightness", {"level": min(100, int(m[1] or m[2]))}
+        return "set_brightness", {"level": min(100, int(m[1] or m[2])), "device": device_of(t, "phone")}
     if re.search(r"\b(max|full|maximum)\b.*\bbright|\bas bright as possible\b", t):
-        return "set_brightness", {"level": 100}
+        return "set_brightness", {"level": 100, "device": device_of(t, "phone")}
     if m := re.search(r"\bvolume\b.*?(\d{1,3})", t):
         return "set_volume", {"level": min(100, int(m[1]))}
     if re.fullmatch(r"mute(?: the)?(?: phone)?|silence(?: the)? phone", t):

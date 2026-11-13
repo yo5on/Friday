@@ -13,5 +13,5 @@ port = 8765
 
 # Projects FROSTI may touch. Commands run from the project folder.
 [projects.frosti]
-path = "E:/frosti"
+path = "E:/sparky"
 test = ".venv/Scripts/python.exe -m unittest discover -s core/tests"

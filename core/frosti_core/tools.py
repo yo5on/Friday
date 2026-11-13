@@ -3,7 +3,7 @@
 Phone tools have no laptop implementation (run=None): the gateway forwards them to the Shell app.
 Every run() returns (spoken_text, detail_text), optionally plus a media preview dict (title, artist, album, art, app).
 """
-import base64, ctypes, difflib, json, os, re, shutil, subprocess, threading, time, urllib.parse, urllib.request
+import asyncio, base64, ctypes, difflib, json, os, re, shutil, subprocess, threading, time, urllib.parse, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -170,9 +170,14 @@ def open_vscode(path):
     return f"Opening {Path(path).name} in VS Code.", path
 
 def git(project_name, action, message=None):
+    p = Path(project_name or "")
+    if action == "github" and p.is_absolute() and p.is_dir():  # read-only, so any folder picked in the + menu is fine
+        return github_status(p.name, p)
     name, path = project(project_name)
     cmds = {"status": ["git", "status", "-sb"], "log": ["git", "log", "--oneline", "-5"], "diff": ["git", "diff", "--stat"],
             "pull": ["git", "pull", "--ff-only"], "push": ["git", "push"]}
+    if action == "github":
+        return github_status(name, path)
     if action == "commit":
         if not message:
             return "What should the commit message be?", ""
@@ -195,6 +200,66 @@ def git(project_name, action, message=None):
     else:
         spoken = f"git {action} done for {name}."
     return spoken, out
+
+_repos = {"t": 0, "list": []}
+
+def git_repos():
+    """Configured projects, then git folders one level under each fixed drive and the home folders (cached 5 min)."""
+    if time.time() - _repos["t"] > 300:
+        roots = [Path(d.mountpoint) for d in psutil.disk_partitions() if "fixed" in d.opts]
+        roots += [Path.home() / s for s in ("", "Documents", "Desktop", "source/repos")]
+        found = {str(Path(v["path"]).resolve()).lower(): dict(name=k, path=str(Path(v["path"]))) for k, v in PROJECTS.items()}
+        for r in roots:
+            try:
+                for d in r.iterdir():
+                    if (d / ".git").exists():
+                        found.setdefault(str(d.resolve()).lower(), dict(name=d.name, path=str(d)))
+            except OSError:
+                continue  # locked drive or missing folder
+        _repos.update(t=time.time(), list=list(found.values()))
+    return _repos["list"]
+
+def list_dirs(path):
+    """Subfolders of `path` for the Laptop panel's folder browser: [{name, git}], hidden and system ones left out."""
+    p = Path(path)
+    if not p.is_absolute() or not p.is_dir():
+        raise OSError(f"not a folder: {path}")
+    out = []
+    for d in p.iterdir():
+        try:
+            if d.is_dir() and not d.name.startswith((".", "$")) and d.name not in ("System Volume Information", "node_modules"):
+                out.append(dict(name=d.name, git=(d / ".git").exists()))
+        except OSError:
+            continue  # no access
+    return sorted(out, key=lambda d: d["name"].lower())[:300]
+
+def browse_start():
+    """Where the folder browser opens: the first project's drive (E:\\ here), else the home folder."""
+    for v in PROJECTS.values():
+        return Path(v["path"]).anchor or str(Path.home())
+    return str(Path.home())
+
+def github_status(name, path):
+    """Branch, local changes and ahead/behind from git; open PRs and the latest CI run from the gh CLI."""
+    rc, out = sh(["git", "status", "-sb"], path)
+    if rc != 0:
+        return f"git status failed for {name}.", out
+    head, *changed = out.splitlines()
+    m = re.match(r"## (\S+?)(?:\.\.\.\S+)?(?: \[(.*)\])?$", head)
+    spoken = f"{name} is on {m[1] if m else head[3:]}, " + (f"{len(changed)} changed files" if changed else "clean")
+    spoken += f", {m[2]}." if m and m[2] else "."
+    if not shutil.which("gh"):
+        return spoken + " Install the GitHub CLI for pull requests and CI.", out
+    rc1, prs = sh(["gh", "pr", "list", "--json", "number,title"], path, timeout=20)
+    rc2, runs = sh(["gh", "run", "list", "-L", "1", "--json", "workflowName,status,conclusion,headBranch"], path, timeout=20)
+    if rc1 != 0:
+        return spoken + " I couldn't reach GitHub.", out + "\n" + prs
+    prs, runs = json.loads(prs or "[]"), (json.loads(runs or "[]") if rc2 == 0 else [])
+    spoken += f" {len(prs) or 'No'} open pull request{'' if len(prs) == 1 else 's'}."
+    if runs:
+        r = runs[0]
+        spoken += f" Last CI run, {r['workflowName']} on {r['headBranch']}: {r['conclusion'] or r['status'].replace('_', ' ')}."
+    return spoken, "\n".join([out] + [f"#{p['number']} {p['title']}" for p in prs])
 
 def run_project(project_name, task):
     name, path = project(project_name)
@@ -287,12 +352,32 @@ def _call(obj, slot, *args):
     types = (type(a) if hasattr(type(a), "from_param") else ctypes.c_void_p for a in args)  # byref() args are pointers
     return ctypes.WINFUNCTYPE(ctypes.HRESULT, ctypes.c_void_p, *types)(vtbl[slot])(obj, *args)
 
+def laptop_brightness(level=None):
+    """Set the built-in screen to `level` 0-100 (None just reads it) through WMI; returns the level.
+    Raises OSError where unsupported (external monitors)."""
+    if level is None:
+        ps = "(Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightness -ErrorAction Stop | Select-Object -First 1).CurrentBrightness"
+    else:
+        level = max(0, min(100, int(level)))
+        ps = (f"Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods -ErrorAction Stop | "
+              f"Invoke-CimMethod -MethodName WmiSetBrightness -Arguments @{{Timeout=0; Brightness={level}}} | Out-Null; {level}")
+    rc, out = sh(["powershell", "-NoProfile", "-Command", ps], timeout=20)
+    if rc != 0 or not out.strip().isdigit():
+        raise OSError(f"brightness: {out[:200]}")
+    return int(out.strip())
+
+def set_laptop_brightness(level):
+    try:
+        return f"Laptop brightness {laptop_brightness(level)}%.", ""
+    except OSError as e:
+        return "I can't change this laptop's brightness.", str(e)
+
 def laptop_volume(step=0, level=None):
     """Move the laptop's master volume by `step` x 5 %, or set it to `level` 0-100 (neither just reads it), unmuting;
     returns the level 0-100.
     Plain ctypes over Windows Core Audio (IMMDeviceEnumerator -> IMMDevice -> IAudioEndpointVolume): no extra dependency."""
     ole, P = ctypes.windll.ole32, ctypes.c_void_p
-    ole.CoInitialize(None)  # per thread; "already initialised" is fine
+    ole.CoInitializeEx(None, 0)  # multithreaded: a plain CoInitialize made the event loop single-threaded and hung WinRT cover reads
     enum, dev, vol = P(), P(), P()
     try:
         hr = ole.CoCreateInstance(ctypes.byref(_guid("{BCDE0395-E52F-467C-8E3D-C4579291692E}")), None, 1,
@@ -414,17 +499,26 @@ async def now_playing():
     app = s.source_app_user_model_id.rsplit("\\", 1)[-1].split("!")[0].removesuffix(".exe")
     app = "Spotify" if "spotify" in app.lower() else app
     key = (p.title, p.artist, app)
-    if key != _np["key"]:  # cover art only when the track changes
-        art = None
-        if p.thumbnail:
-            try:
-                stream = await p.thumbnail.open_read_async()
-                buf = Buffer(stream.size)
-                await stream.read_async(buf, buf.capacity, InputStreamOptions.READ_AHEAD)
-                art = f"data:{stream.content_type or 'image/png'};base64," + base64.b64encode(bytes(buf)).decode()
-            except OSError:
-                pass
-        _np.update(key=key, art=art)
+    if key != _np["key"]:
+        _np.update(key=key, art=None)
+    # cover in the background, retried each poll until it lands: a cover read can hang for good (seen with Spotify
+    # right at a track change), and awaiting it here froze the phone on the old track
+    cover = _np.get("cover")
+    if p.thumbnail and _np["art"] is None and (cover is None or cover.done()):
+        async def read(thumb):
+            stream = await thumb.open_read_async()
+            buf = Buffer(stream.size)
+            await stream.read_async(buf, buf.capacity, InputStreamOptions.READ_AHEAD)
+            return f"data:{stream.content_type or 'image/png'};base64," + base64.b64encode(bytes(buf)).decode()
+        async def fetch(thumb):
+            task = asyncio.ensure_future(read(thumb))
+            done, _ = await asyncio.wait({task}, timeout=3)  # not wait_for: a hung WinRT call ignores cancel
+            if not done:
+                task.add_done_callback(lambda t: t.cancelled() or t.exception())
+                print(f"[media] cover read stuck for {key[0]}; retrying", flush=True)
+            elif not task.exception() and _np["key"] == key:
+                _np["art"] = task.result()
+        _np["cover"] = asyncio.ensure_future(fetch(p.thumbnail))  # held so it isn't garbage-collected mid-read
     info = s.get_playback_info()
     playing = info.playback_status == 4  # GlobalSystemMediaTransportControlsSessionPlaybackStatus.PLAYING
     tl = s.get_timeline_properties()
@@ -530,7 +624,7 @@ def describe_screen(device="laptop"):
 
 S, I = {"type": "string"}, {"type": "integer"}
 DEV = {"type": "string", "enum": ["phone", "laptop"]}
-GIT_TIER = {"status": 0, "log": 0, "diff": 0, "pull": 1, "commit": 2, "push": 3}
+GIT_TIER = {"status": 0, "github": 0, "log": 0, "diff": 0, "pull": 1, "commit": 2, "push": 3}
 
 TOOLS = {t.name: t for t in [
     Tool("open_app", "Open an app on the phone or laptop", {"name": S, "device": DEV}, ["name", "device"], 1,
@@ -538,7 +632,8 @@ TOOLS = {t.name: t for t in [
     Tool("get_status", "Read a system metric",
          {"metric": {"type": "string", "enum": ["battery", "ram", "cpu", "storage", "temperature", "processes"]}, "device": DEV},
          ["metric", "device"], 0, get_status, phone_if=lambda a: a.get("device") == "phone"),
-    Tool("set_brightness", "Set phone screen brightness percent", {"level": I}, ["level"], 1),
+    Tool("set_brightness", "Set phone or laptop screen brightness percent", {"level": I, "device": DEV}, ["level"], 1,
+         lambda level, device="laptop": set_laptop_brightness(level), phone_if=lambda a: a.get("device") != "laptop"),
     Tool("set_volume", "Set phone media volume percent", {"level": I}, ["level"], 1),
     Tool("open_vscode", "Open a folder in VS Code on the laptop", {"path": S}, ["path"], 1, open_vscode),
     Tool("git", "Run a read-only or commit git action in a project",

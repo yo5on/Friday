@@ -28,7 +28,7 @@ import psutil
 import websockets
 from . import CONFIG, DATA
 from .brain import Brain, Session, sentences
-from .tools import PROJECTS, laptop_volume, media_session, now_playing, top_processes_cached
+from .tools import PROJECTS, browse_start, git_repos, laptop_brightness, laptop_volume, list_dirs, media_session, now_playing, top_processes_cached
 
 MEDIA_ACTIONS = {"play", "pause", "next", "previous", "shuffle"}
 from .voice import Listener
@@ -194,6 +194,17 @@ class PhoneSession(Session):
                     await self.send(type="volume", level=laptop_volume(m.get("step") or 0, m.get("level")))
                 except OSError as e:
                     print(f"[volume] {e}", flush=True)
+            elif t == "brightness" and (m.get("level") is None or type(m.get("level")) is int and 0 <= m["level"] <= 100):
+                try:  # the Laptop panel's slider sets a level on release; no level just reads it (WMI via PowerShell: off the loop)
+                    await self.send(type="brightness", level=await asyncio.to_thread(laptop_brightness, m.get("level")))
+                except OSError as e:
+                    print(f"[brightness] {e}", flush=True)
+            elif t == "dirs" and isinstance(m.get("path"), str):  # the Laptop panel's folder browser ("" = where it starts)
+                path = m["path"] or browse_start()
+                try:
+                    await self.send(type="dirs", path=str(Path(path)), dirs=await asyncio.to_thread(list_dirs, path))
+                except OSError as e:
+                    await self.send(type="dirs", path=str(Path(path)), dirs=[], error=str(e))
             elif t == "new":  # console "New chat": drop the follow-up context
                 self.brain.history = []
             elif t == "ptt" and self.listener:
@@ -241,6 +252,8 @@ def stats(brain):
                 voice=getattr(brain, "voice_loaded", False),
                 voice_name=CONFIG["speech"]["voice"], phone=any(s.name == "phone" for s in brain.sessions),
                 phone_stats=getattr(brain, "phone_stats", None), uptime=round(time.time() - STARTED),
+                apps=brain.store.top_apps(),  # quick-launch chips on the empty chat
+                repos=git_repos(),  # the + menu's GitHub folder list
                 gateway=f"{CONFIG['gateway']['host']}:{CONFIG['gateway']['port']}")
 
 def memory(brain):
@@ -277,6 +290,17 @@ def console_page(connection, request):
     r.headers["Cache-Control"] = "no-store"
     return r
 
+async def bounded(coro, seconds):
+    """asyncio.wait_for that gives up for real: wait_for waits for the cancelled call to finish, and a WinRT media call
+    that hangs (seen when a Spotify ad ended) ignores cancel, which froze the Music feed for good. Here it is left behind."""
+    task = asyncio.ensure_future(coro)
+    done, _ = await asyncio.wait({task}, timeout=seconds)
+    if not done:
+        task.cancel()
+        task.add_done_callback(lambda t: t.cancelled() or t.exception())  # no "exception never retrieved" noise later
+        raise asyncio.TimeoutError
+    return task.result()
+
 def _still(md):
     return md and {k: v for k, v in md.items() if k != "position"}
 
@@ -290,7 +314,7 @@ async def watch_media(brain, every=2.0):
     last, sent = None, 0.0
     while True:
         try:
-            md = await asyncio.wait_for(now_playing(), 5)
+            md = await bounded(now_playing(), 5)
         except Exception as e:  # a media app quitting mid-read, or Windows not answering; keep watching
             print(f"[media] {type(e).__name__}: {e}", flush=True)
             md = last

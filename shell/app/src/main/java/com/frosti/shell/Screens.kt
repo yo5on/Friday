@@ -168,6 +168,8 @@ class TalkScreen(private val a: MainActivity) : Screen {
             if (action == EditorInfo.IME_ACTION_SEND || ev?.keyCode == KeyEvent.KEYCODE_ENTER) { go(); true } else false
         }
         addView(input, lp(0, a.dp(48), 1f))
+        addView(FrameLayout(a).apply { contentDescription = "Laptop settings"
+            addView(Icon(a, "sliders", Ui.MUTED), FrameLayout.LayoutParams(a.dp(20), a.dp(20), Gravity.CENTER)) }.pressable { laptop() }, lp(a.dp(44), a.dp(48)))
         val icon = Icon(a, "mic", Ui.TEXT)
         val btn = FrameLayout(a).apply { addView(icon, FrameLayout.LayoutParams(a.dp(22), a.dp(22), Gravity.CENTER)) }
         input.addTextChangedListener(object : android.text.TextWatcher {
@@ -206,6 +208,78 @@ class TalkScreen(private val a: MainActivity) : Screen {
             "Phone timers" to { a.showTimers() },
             "Open on laptop…" to { a.prompt("Open on laptop", "App name") { a.command("open $it on the laptop", show = false) } })
         a.choose("Quick actions", acts.map { it.first }) { acts[it].second() }
+    }
+
+    /** The laptop button right of the input: brightness and volume sliders, then the git folders (tap one for its GitHub status). */
+    private fun laptop() {
+        if (!a.linked) return android.widget.Toast.makeText(a, "Not linked to the laptop.", android.widget.Toast.LENGTH_SHORT).show()
+        val box = a.vbox().apply { setPadding(a.dp(24), 0, a.dp(24), a.dp(12)) }
+        // volume follows the drag like Music's slider; brightness goes on release (each set is a PowerShell call on the laptop)
+        fun slider(name: String, type: String, start: Int): SeekBar {
+            val pct = a.label(if (start >= 0) "$start%" else "…", Ui.MUTED, 10f)
+            box.addView(a.hbox().apply { addView(a.label(name, Ui.MUTED, 10f), lp(0, -2, 1f)); addView(pct) }, lp().margins(t = a.dp(12)))
+            return SeekBar(a).apply {
+                max = 100; progress = start.coerceAtLeast(0); contentDescription = "Laptop ${name.lowercase()}"
+                progressTintList = ColorStateList.valueOf(Ui.ACCENT); thumbTintList = ColorStateList.valueOf(Ui.TEXT)
+                progressBackgroundTintList = ColorStateList.valueOf(Ui.MUTED)
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(s: SeekBar, v: Int, user: Boolean) {
+                        pct.text = "$v%"
+                        if (user && type == "volume") a.send(JSONObject().put("type", "volume").put("level", v))
+                    }
+                    override fun onStartTrackingTouch(s: SeekBar) {}
+                    override fun onStopTrackingTouch(s: SeekBar) {
+                        if (type == "brightness") a.send(JSONObject().put("type", "brightness").put("level", s.progress))
+                    }
+                })
+                box.addView(this, lp(-1, a.dp(40)))
+            }
+        }
+        val bright = slider("BRIGHTNESS", "brightness", -1)
+        val vol = slider("VOLUME", "volume", a.laptopVolume)
+        box.addView(a.label("GITHUB STATUS", Ui.MUTED, 10f), lp().margins(t = a.dp(16), b = a.dp(4)))
+        lateinit var d: android.app.AlertDialog
+        box.addView(a.text(15f, Ui.ACCENT).apply { text = "Browse folders…"; setPadding(0, a.dp(10), 0, a.dp(10)) }
+            .pressable { d.dismiss(); browse("") })
+        val repos = a.stats?.optJSONArray("repos")
+        for (i in 0 until (repos?.length() ?: 0)) {
+            val r = repos!!.getJSONObject(i)
+            box.addView(a.hbox().apply {
+                gravity = Gravity.CENTER_VERTICAL; setPadding(0, a.dp(10), 0, a.dp(10))
+                addView(a.text(15f, Ui.TEXT).apply { text = r.optString("name") }, lp(0, -2, 1f))
+                addView(a.label(r.optString("path"), Ui.DIM, 10f))
+            }.pressable { d.dismiss(); a.command("what's the github status of ${r.optString("path")}") })
+        }
+        if ((repos?.length() ?: 0) == 0) box.addView(a.text(14f, Ui.DIM).apply { text = "No git folders found." })
+        d = a.styled(android.app.AlertDialog.Builder(a, android.R.style.Theme_Material_Dialog_Alert)
+            .setCustomTitle(a.dialogTitle("Laptop", Ui.ACCENT)).setView(ScrollView(a).apply { addView(box) }).create())
+        val h: (JSONObject) -> Unit = { m -> when (m.optString("type")) { "brightness" -> bright.progress = m.optInt("level"); "volume" -> vol.progress = m.optInt("level") } }
+        a.panel = h
+        d.setOnDismissListener { if (a.panel === h) a.panel = null }  // runs after browse() may have taken over
+        a.send(JSONObject().put("type", "brightness"))  // the current levels
+        a.send(JSONObject().put("type", "volume").put("step", 0))
+    }
+
+    /** Folder browser on the laptop ("" = the project drive): one list per folder, git folders marked; check any one. */
+    private fun browse(path: String) {
+        a.panel = { m -> if (m.optString("type") == "dirs") { a.panel = null; dirs(m) } }
+        a.send(JSONObject().put("type", "dirs").put("path", path))
+    }
+
+    private fun dirs(m: JSONObject) {
+        val path = m.optString("path").trimEnd('\\')  // "E:" for the drive root
+        val arr = m.optJSONArray("dirs")
+        val list = (0 until (arr?.length() ?: 0)).map { arr!!.getJSONObject(it) }
+        val up = path.lastIndexOf('\\').takeIf { it > 0 }?.let { path.substring(0, it) }
+        val items = listOf("✓  Check GitHub status here") + listOfNotNull(up?.let { "↑  Up" }) +
+            list.map { (if (it.optBoolean("git")) "●  " else "    ") + it.optString("name") }
+        a.choose("$path\\", items) { i ->
+            when {
+                i == 0 -> a.command("what's the github status of $path\\")
+                up != null && i == 1 -> browse("$up\\")
+                else -> browse("$path\\" + list[i - (if (up != null) 2 else 1)].optString("name"))
+            }
+        }
     }
 
     /** Now-playing preview under the reply that started it (art arrives as data: the hotspot has no internet). */
@@ -532,24 +606,26 @@ class SetupScreen(private val a: MainActivity) : Screen {
 // ---------- MUSIC: desk now-playing panel for whatever the laptop plays ----------
 class MusicScreen(private val a: MainActivity) : Screen {
     private val art = ImageView(a).apply { scaleType = ImageView.ScaleType.CENTER_CROP; clipToOutline = true
-        background = pill(Ui.SURFACE, radius = a.dpf(10f)) }
-    private val source = a.label("", Ui.ACCENT_DIM, 11f)
+        background = pill(Ui.SURFACE, radius = a.dpf(12f)); elevation = a.dpf(12f) }
+    private val source = a.label("", Ui.MUTED, 10f)
     private val title = a.text(if (a.portrait) 24f else 26f, Ui.TEXT, Ui.SERIF).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
-    private val artist = a.text(18f, Ui.MUTED).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
+    private val artist = a.text(16f, Ui.MUTED).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
     private val bar = Meter(a, warn = false)
-    private val elapsed = a.label("", Ui.MUTED, 11f)
-    private val remain = a.label("", Ui.MUTED, 11f)
+    private val elapsed = a.label("", Ui.MUTED, 10f)
+    private val remain = a.label("", Ui.MUTED, 10f)
     private val shuffle = Icon(a, "shuffle", Ui.MUTED)
     private val play = Icon(a, "play", Ui.BG)
+    private val volPct = a.label("", Ui.MUTED, 10f).apply { gravity = Gravity.END }
     private var dragging = false
     // laptop volume, like Spotify's slider; each move sets the level, the Core answers with the real one
     private val volume = android.widget.SeekBar(a).apply {
         max = 100; contentDescription = "Laptop volume"
-        progressTintList = android.content.res.ColorStateList.valueOf(Ui.ACCENT)
+        progressTintList = android.content.res.ColorStateList.valueOf(Ui.TEXT)
         thumbTintList = android.content.res.ColorStateList.valueOf(Ui.TEXT)
-        progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Ui.LINE)
+        progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Ui.MUTED)
         setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(s: android.widget.SeekBar, v: Int, user: Boolean) {
+                volPct.text = "$v%"
                 if (user) a.send(JSONObject().put("type", "volume").put("level", v))
             }
             override fun onStartTrackingTouch(s: android.widget.SeekBar) { dragging = true }
@@ -561,58 +637,54 @@ class MusicScreen(private val a: MainActivity) : Screen {
     private var ticking = false
 
     // landscape: the cover as tall as the page on the left, one column beside it (track, progress, controls, volume);
-    // portrait: cover on top, the same column centred underneath. The page takes a wash of the cover's colour.
+    // portrait: cover on top, the same column centred underneath. Behind it all, a blur of the cover.
     override val view: View = FrameLayout(a).apply {
         val p = a.portrait
         val dm = a.resources.displayMetrics
-        val side = a.dp(if (p) 240 else minOf((dm.heightPixels / dm.density).toInt() - 72, 240))  // the old column overflowed the 360 dp height
+        val side = a.dp(if (p) 240 else minOf((dm.heightPixels / dm.density).toInt() - 72, 256))
         val words = a.vbox().apply {
             if (p) gravity = Gravity.CENTER_HORIZONTAL
             addView(source)
-            addView(title.apply { if (p) gravity = Gravity.CENTER }, lp().margins(t = a.dp(8)))
+            addView(title.apply { if (p) gravity = Gravity.CENTER }, lp().margins(t = a.dp(10)))
             addView(artist.apply { if (p) gravity = Gravity.CENTER }, lp().margins(t = a.dp(4)))
         }
-        // Spotify's row: shuffle · previous · play · next · search; the four small ones share the width left by play
+        // Spotify's row: shuffle, previous, play, next, search; the four small ones share the width left by play
         val controls = a.hbox().apply { gravity = Gravity.CENTER }
         fun button(icon: View, size: Int, onTap: () -> Unit) = controls.addView(FrameLayout(a).apply {
             addView(icon, FrameLayout.LayoutParams(size, size, Gravity.CENTER))
-        }.pressable(onTap), lp(0, a.dp(52), 1f))
-        button(shuffle, a.dp(20)) { act("shuffle") }
-        button(Icon(a, "prev", Ui.TEXT), a.dp(22)) { act("previous") }
-        controls.addView(FrameLayout(a).apply { background = pill(Ui.ACCENT); addView(play, FrameLayout.LayoutParams(a.dp(24), a.dp(24), Gravity.CENTER)) }
-            .pressable { act(if (playing) "pause" else "play"); playing = !playing; render() }, lp(a.dp(60), a.dp(60)))  // instant; Core corrects it
-        button(Icon(a, "next", Ui.TEXT), a.dp(22)) { act("next") }
-        button(Icon(a, "search", Ui.MUTED), a.dp(20)) { a.prompt("Spotify", "Song, artist or album") { a.command("search $it on spotify") } }  // results (with play buttons) land in Chat
+        }.pressable(onTap), lp(0, a.dp(48), 1f))
+        button(shuffle, a.dp(18)) { act("shuffle") }
+        button(Icon(a, "prev", Ui.TEXT), a.dp(20)) { act("previous") }
+        controls.addView(FrameLayout(a).apply { background = pill(Ui.TEXT); elevation = a.dpf(4f)
+            addView(play, FrameLayout.LayoutParams(a.dp(22), a.dp(22), Gravity.CENTER)) }
+            .pressable { act(if (playing) "pause" else "play"); playing = !playing; render() }, lp(a.dp(56), a.dp(56)))  // instant; Core corrects it
+        button(Icon(a, "next", Ui.TEXT), a.dp(20)) { act("next") }
+        button(Icon(a, "search", Ui.MUTED), a.dp(18)) { a.prompt("Spotify", "Song, artist or album") { a.command("search $it on spotify") } }  // results (with play buttons) land in Chat
         val column = a.vbox().apply {
             gravity = Gravity.CENTER_VERTICAL or if (p) Gravity.CENTER_HORIZONTAL else 0
             addView(words, lp(-1, -2))
-            addView(bar, lp(-1, a.dp(4)).margins(t = a.dp(22)))
-            addView(a.hbox().apply { addView(elapsed, lp(0, -2, 1f)); addView(remain) }, lp(-1, -2).margins(t = a.dp(8)))
-            addView(controls, lp(-1, -2).margins(t = a.dp(8)))
+            addView(bar, lp(-1, a.dp(3)).margins(t = a.dp(20)))
+            addView(a.hbox().apply { addView(elapsed, lp(0, -2, 1f)); addView(remain) }, lp(-1, -2).margins(t = a.dp(6)))
+            addView(controls, lp(-1, -2).margins(t = a.dp(6)))
             addView(a.hbox().apply {
-                addView(Icon(a, "speaker", Ui.MUTED), lp(a.dp(18), a.dp(18)))
-                addView(volume, lp(0, a.dp(36), 1f))
-            }, lp(-1, -2).margins(t = a.dp(6)))
+                addView(Icon(a, "speaker", Ui.MUTED), lp(a.dp(16), a.dp(16)))
+                addView(volume, lp(0, a.dp(32), 1f))
+                addView(volPct, lp(a.dp(36), -2))
+            }, lp(-1, -2).margins(t = a.dp(4)))
         }
         val body = if (p) a.vbox().apply { gravity = Gravity.CENTER_HORIZONTAL
             addView(art, lp(side, side).margins(b = a.dp(24))); addView(column, lp(-1, -2))
         } else a.hbox().apply {
             addView(art, lp(side, side).margins(r = a.dp(28))); addView(column, lp(0, -1, 1f))
         }
-        art.elevation = a.dpf(8f)  // lifts the cover off the page
         addView(body, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER).apply {
             setMargins(a.dp(if (p) 24 else 28), a.dp(16), a.dp(if (p) 24 else 28), a.dp(16)) })
     }
 
-    // Android 9 has no blur: average a 12×12 copy of the cover, mix 30 % of it into the page colour, fade to plain bottom-right
-    private fun wash(b: android.graphics.Bitmap?): android.graphics.drawable.Drawable? {
-        if (b == null) return null
-        val s = android.graphics.Bitmap.createScaledBitmap(b, 12, 12, true)
-        var r = 0; var g = 0; var bl = 0
-        for (x in 0 until 12) for (y in 0 until 12) s.getPixel(x, y).let { r += Color.red(it); g += Color.green(it); bl += Color.blue(it) }
-        fun mix(c: Int, page: Int) = (c / 144 * 0.3f + page * 0.7f).toInt()
-        val tint = Color.rgb(mix(r, Color.red(Ui.BG)), mix(g, Color.green(Ui.BG)), mix(bl, Color.blue(Ui.BG)))
-        return android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TL_BR, intArrayOf(tint, Ui.BG))
+    // Android 9 has no blur: a 6×6 copy of the cover stretched with filtering reads as one; a dark scrim keeps the text legible
+    private fun backdrop(b: android.graphics.Bitmap?): android.graphics.drawable.Drawable? = b?.let {
+        val blur = android.graphics.drawable.BitmapDrawable(a.resources, android.graphics.Bitmap.createScaledBitmap(it, 6, 6, true)).apply { isFilterBitmap = true }
+        android.graphics.drawable.LayerDrawable(arrayOf(blur, android.graphics.drawable.ColorDrawable(Color.argb(185, 24, 24, 22))))
     }
 
     private fun act(action: String) {
@@ -625,18 +697,18 @@ class MusicScreen(private val a: MainActivity) : Screen {
     private fun render() {
         val m = a.media
         if (m == null) {
-            source.text = "Laptop"; title.text = "Nothing playing"; artist.text = "Say “play a song on Spotify”."
+            source.text = "LAPTOP"; title.text = "Nothing playing"; artist.text = "Say “play a song on Spotify”."
             art.setImageDrawable(null); artKey = null; view.background = null; bar.value = -1f; elapsed.text = ""; remain.text = ""
             play.kind = "play"; shuffle.visibility = View.INVISIBLE; return
         }
-        source.text = "${m.optString("app")} · laptop".uppercase()
+        source.text = "Playing on laptop · ${m.optString("app")}".uppercase()
         title.text = m.optString("title"); artist.text = m.optString("artist")
         val key = if (m.isNull("art")) null else m.optString("art")
         if (key != artKey) {
             artKey = key
             val bytes = key?.substringAfter("base64,", "")?.let { runCatching { Base64.decode(it, Base64.DEFAULT) }.getOrNull() }
             val bmp = bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
-            art.setImageBitmap(bmp); view.background = wash(bmp)
+            art.setImageBitmap(bmp); view.background = backdrop(bmp)
         }
         play.kind = if (playing) "pause" else "play"
         shuffle.visibility = if (m.isNull("shuffle")) View.INVISIBLE else View.VISIBLE
@@ -653,14 +725,18 @@ class MusicScreen(private val a: MainActivity) : Screen {
         override fun run() { if (view.isShown) { render(); view.postDelayed(this, 1000) } else ticking = false }
     }
 
-    init { playing = a.media?.optBoolean("playing") == true; render() }
+    // a rebuilt screen (rotation) starts at the last level the Core reported, not at 0
+    init { playing = a.media?.optBoolean("playing") == true; if (a.laptopVolume >= 0) volume.progress = a.laptopVolume; render() }
 
     override fun onShow() {
         render(); if (!ticking) { ticking = true; view.postDelayed(run, 1000) }
-        a.send(JSONObject().put("type", "volume").put("step", 0))  // the slider starts at the laptop's level
+        a.send(JSONObject().put("type", "volume").put("step", 0))  // then the Core's real level
     }
     override fun onEvent(m: JSONObject) {
-        if (m.optString("type") == "now_playing") { playing = a.media?.optBoolean("playing") == true; render() }
-        if (m.optString("type") == "volume" && !dragging) volume.progress = m.optInt("level")
+        when (m.optString("type")) {
+            "now_playing" -> { playing = a.media?.optBoolean("playing") == true; render() }
+            "volume" -> if (!dragging) volume.progress = m.optInt("level")
+            "conn" -> if (m.optBoolean("ok") && view.isShown) onShow()  // relinked while open: refresh the slider
+        }
     }
 }

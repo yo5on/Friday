@@ -12,13 +12,17 @@ FAST = [  # utterance -> (tool, args) the fast path must produce
     ("How much battery does the phone have left?", ("get_status", {"metric": "battery", "device": "phone"})),
     ("what's my laptop RAM usage", ("get_status", {"metric": "ram", "device": "laptop"})),
     ("is the laptop running hot?", ("get_status", {"metric": "temperature", "device": "laptop"})),
-    ("Set brightness to forty percent.", ("set_brightness", {"level": 40})),
-    ("make the screen as bright as possible", ("set_brightness", {"level": 100})),
+    ("Set brightness to forty percent.", ("set_brightness", {"level": 40, "device": "phone"})),
+    ("set the laptop brightness to 60", ("set_brightness", {"level": 60, "device": "laptop"})),
+    ("make the screen as bright as possible", ("set_brightness", {"level": 100, "device": "phone"})),
     ("turn the volume down to 20", ("set_volume", {"level": 20})),
     ("mute the phone", ("set_volume", {"level": 0})),
     (r"open E:\frosti in vs code", ("open_vscode", {"path": r"e:\frosti"})),
     ("git status for frosti", ("git", {"project": "frosti", "action": "status"})),
     ("Show me the recent commits in frosti.", ("git", {"project": "frosti", "action": "log"})),
+    ("what's the github status of frosti", ("git", {"project": "frosti", "action": "github"})),
+    ("any open PRs on frosti?", ("git", {"project": "frosti", "action": "github"})),
+    (r"what's the github status of E:\Personal-website", ("git", {"project": r"e:\personal-website", "action": "github"})),
     ("push frosti to github", ("git", {"project": "frosti", "action": "push"})),
     ("Run the tests for frosti.", ("run_project", {"project": "frosti", "task": "test"})),
     ("start the frosti dev server", ("run_project", {"project": "frosti", "task": "dev"})),
@@ -441,6 +445,20 @@ class NowPlayingPush(unittest.TestCase):
                 asyncio.run(gateway.watch_media(brain, every=0))
         self.assertEqual([json.loads(m)["media"]["position"] for m in WS.sent], [10, 60])  # drift ignored, seek pushed
         self.assertEqual(brain.now_playing["position"], 61)  # late joiners get the fresh position
+
+    def test_hung_read_does_not_freeze_the_feed(self):
+        from frosti_core import gateway
+        async def stubborn():  # like a WinRT call that ignores cancel: wait_for would sit here 10 s
+            try:
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                await asyncio.sleep(10)  # the second cancel (asyncio.run's shutdown) ends it
+        async def main():
+            t = time.monotonic()
+            with self.assertRaises(asyncio.TimeoutError):
+                await gateway.bounded(stubborn(), 0.05)
+            return time.monotonic() - t
+        self.assertLess(asyncio.run(asyncio.wait_for(main(), 2)), 1)
 
 class DroppedReply(unittest.TestCase):
     def test_reply_kept_when_phone_drops_and_sent_on_reconnect(self):

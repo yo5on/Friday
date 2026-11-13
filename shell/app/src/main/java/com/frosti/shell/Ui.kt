@@ -94,6 +94,21 @@ class Meter(ctx: Context, private val warn: Boolean = true) : View(ctx) {
     }
 }
 
+/** Countdown ring: a faint full track and an arc for the share of time left (0..1), from 12 o'clock. */
+class Ring(ctx: Context) : View(ctx) {
+    var value = 1f
+        set(v) { field = v; invalidate() }
+    var color = Ui.ACCENT
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+    private val o = android.graphics.RectF()
+    override fun onDraw(c: Canvas) {
+        val s = minOf(width, height).toFloat(); p.strokeWidth = s * 0.12f
+        val in_ = p.strokeWidth / 2; o.set((width - s) / 2 + in_, (height - s) / 2 + in_, (width + s) / 2 - in_, (height + s) / 2 - in_)
+        p.color = Ui.LINE; c.drawOval(o, p)
+        p.color = color; c.drawArc(o, -90f, 360f * value.coerceIn(0f, 1f), false, p)
+    }
+}
+
 /** Line icons drawn on Canvas (no image assets): mic, grid, pulse, timer, send, chat, list, sliders; media: play, pause, prev, next, shuffle, note. */
 class Icon(ctx: Context, kind: String, var color: Int = Ui.ACCENT) : View(ctx) {
     var kind = kind
