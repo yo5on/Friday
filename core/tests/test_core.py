@@ -1,4 +1,4 @@
-import asyncio, json, sqlite3, sys, tempfile, unittest
+import asyncio, json, sqlite3, sys, tempfile, time, unittest
 from unittest import mock
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -230,7 +230,7 @@ class BrainPolicy(unittest.TestCase):
              mock.patch.object(tools.os, "startfile", opened.append, create=True):
             r, _ = self.run_("play believer by imagine dragons on spotify")
         search.assert_called_once_with("believer imagine dragons")
-        fetch.assert_called_once_with("mid")
+        fetch.assert_called_once_with("mid", timeout=2)
         self.assertEqual(opened, ["spotify:track:abc"])
         self.assertEqual(r["reply"], "Playing Believer by Imagine Dragons.")
         self.assertEqual(r["media"], {"title": "Believer", "artist": "Imagine Dragons", "album": "Evolve",
@@ -254,7 +254,7 @@ class BrainPolicy(unittest.TestCase):
              mock.patch.object(tools, "_fetch", return_value=b"jpg") as fetch:
             r, _ = self.run_("search believer by imagine dragons on spotify")
         search.assert_called_once_with("believer imagine dragons", 8)
-        fetch.assert_called_with("small")
+        fetch.assert_called_with("small", timeout=2)
         self.assertEqual(r["media"]["tracks"], [{"title": "Believer", "artist": "Imagine Dragons", "album": "Evolve",
                                                  "art": "data:image/jpeg;base64,anBn", "uri": "spotify:track:abc"}] * 2)
 
@@ -331,6 +331,31 @@ class Dashboards(unittest.TestCase):
         self.assertEqual([t["label"] for t in self.brain.active_timers()], ["tea"])
         self.brain.timers[0]["due"] = 0
         self.assertEqual(self.brain.active_timers(), [])
+
+    def test_top_apps_counts_successful_opens(self):
+        for _ in range(3): self.store.audit("phone", "open_app", {"name": "notepad", "device": "laptop"}, 1, True, "Opening Notepad.")
+        self.store.audit("phone", "open_app", {"name": "notepad", "device": "phone"}, 1, True, "I couldn't find notepad on the phone.")
+        self.store.audit("desk", "open_app", {"name": "youtube", "device": "phone"}, 1, True, "Opening YouTube.")
+        self.assertEqual(self.store.top_apps(), [dict(label="Notepad", cmd="open notepad on the laptop"),
+                                                 dict(label="YouTube", cmd="open youtube on the phone")])
+        from frosti_core import router
+        self.assertEqual(router.match("open notepad on the laptop"), ("open_app", {"name": "notepad", "device": "laptop"}))
+
+    def test_timers_survive_a_restart(self):
+        heard = []
+        class Desk(Session):
+            async def notify(s, text): heard.append(text)
+        asyncio.run(self.brain.handle("set a timer for 5 minutes for tea", Session()))
+        self.store.add_timer(time.time() - 60, "eggs")  # came due while the Core was off
+        brain = Brain(self.store)  # the restarted Core
+        self.assertEqual([t["label"] for t in brain.active_timers()], ["tea"])
+        brain.sessions.add(Desk())
+        async def start():
+            brain.resume_timers(asyncio.get_running_loop(), overdue_delay=0)
+            await asyncio.sleep(0.05)
+        asyncio.run(start())
+        self.assertEqual(heard, ["Timer done: eggs."])
+        self.assertEqual([t["label"] for t in self.store.timers()], ["tea"])  # fired timers are removed
 
     def test_phone_timer_runs_on_phone_without_laptop_countdown(self):
         calls = []

@@ -315,8 +315,8 @@ def laptop_volume(step=0, level=None):
 
 _spotify = {"token": "", "until": 0.0}
 
-def _fetch(url, data=None, headers=None):
-    with urllib.request.urlopen(urllib.request.Request(url, data=data, headers=headers or {}), timeout=8) as r:
+def _fetch(url, data=None, headers=None, timeout=8):
+    with urllib.request.urlopen(urllib.request.Request(url, data=data, headers=headers or {}), timeout=timeout) as r:
         return r.read()
 
 def spotify_track(query):
@@ -342,7 +342,8 @@ def spotify_search(query, limit):
 def _art(images, i):
     """Cover as a data: URI (the phone on the offline hotspot can't reach Spotify's image server); images go largest first."""
     try:
-        return "data:image/jpeg;base64," + base64.b64encode(_fetch(images[min(i, len(images) - 1)]["url"])).decode() if images else None
+        # 2 s: a cover is optional, and one slow image shouldn't hold the whole song list for the full 8 s
+        return "data:image/jpeg;base64," + base64.b64encode(_fetch(images[min(i, len(images) - 1)]["url"], timeout=2)).decode() if images else None
     except OSError:
         return None
 

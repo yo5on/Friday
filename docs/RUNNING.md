@@ -145,7 +145,8 @@ Phone timers use the installed Android Clock app, so they keep counting when the
 laptop disconnects or shuts down. Use **Timer** / **Focus session** in Actions,
 or **Memory → Tasks → New phone timer**. **Phone timers** opens Clock to view,
 pause, or cancel them. Phone voice requests also start a timer in Clock when linked.
-Laptop console timers still run on the laptop and disappear if Core restarts.
+Laptop console timers run on the laptop and survive a Core restart; one that came due while
+the Core was off is announced 15 s after it starts again.
 
 Without the laptop, say **Frosti**, wait for the beep, then **five minute timer**
 (or **set a timer for five minutes**). Supported offline durations are 1, 2, 3, 5,

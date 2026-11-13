@@ -71,12 +71,23 @@ class TalkScreen(private val a: MainActivity) : Screen {
         addView(chip("Music") { a.go("music") })
         addView(chip("Focus 25 min") { a.timer("25", "focus") })
     }
+    // your most-opened apps (from the Core's stats), one tap each
+    private val appChips = a.hbox().apply { gravity = Gravity.CENTER }
+    private var appKey = ""
+    private fun apps(list: org.json.JSONArray?) {
+        if (list == null || list.toString() == appKey) return
+        appKey = list.toString(); appChips.removeAllViews()
+        for (i in 0 until list.length()) list.optJSONObject(i)?.let { app ->
+            appChips.addView(chip(app.optString("label")) { a.command(app.optString("cmd")) })
+        }
+    }
     private val welcome: View = a.vbox().apply {
         gravity = Gravity.CENTER
         addView(bigCore, lp(-1, a.dp(if (a.portrait) 130 else 104)))  // full width: walks reach the edges
         addView(greet, lp(-2, -2).margins(t = a.dp(4)))
         addView(welcomeHint, lp(-2, -2).margins(t = a.dp(6)))
         addView(chips, lp(-2, -2).margins(t = a.dp(16)))
+        addView(appChips, lp(-2, -2).margins(t = a.dp(8)))
     }
 
     private fun chip(name: String, onTap: () -> Unit): View =
@@ -300,6 +311,7 @@ class TalkScreen(private val a: MainActivity) : Screen {
     override fun onEvent(m: JSONObject) {
         when (m.optString("type")) {
             "ui_state", "conn" -> refresh()
+            "stats" -> apps(m.optJSONArray("apps"))
             "you" -> entry("You", m.optString("text"), Ui.DIM).also { if (!m.optBoolean("sent")) entry("Frosti", "Not linked to the Core, so that wasn't sent.", Ui.AMBER) }
             "heard" -> m.optString("text").takeIf { it.isNotBlank() }?.let { entry("You · voice", "“$it”", Ui.DIM) }
             "reply" -> {

@@ -409,10 +409,11 @@ document.addEventListener("keydown", e => {
   if (e.key === "/") { e.preventDefault(); show("talk"); }
 });
 function newChat() { $("#log").innerHTML = ""; $("#talk").classList.add("empty"); send({type: "new"}); show("talk"); }  // the Core forgets the follow-up context too
-// starters on the empty chat: a few fixed ones, then your last asks (these fill the box instead of sending)
+// starters on the empty chat: a few fixed ones, your most-opened apps, then your last asks (these fill the box instead of sending)
 const STARTERS = [["Laptop status", "what's the laptop cpu"], ["Play music", "play some music on spotify"], ["Focus 25 min", "set a timer for 25 minutes for focus"]];
 function renderRecents() {
   $("#starters").innerHTML = STARTERS.map(([n, c]) => `<button data-cmd="${esc(c)}">${esc(n)}</button>`).join("") +
+    (S.stats?.apps || []).map(a => `<button data-cmd="${esc(a.cmd)}">${esc(a.label)}</button>`).join("") +
     pref("recent", []).filter(t => !STARTERS.some(s => s[1] === t.toLowerCase())).slice(0, 3).map(t => `<button data-fill="${esc(t)}" title="${esc(t)}">↺ ${esc(t.length > 28 ? t.slice(0, 27) + "…" : t)}</button>`).join("");
 }
 $("#starters").addEventListener("click", e => { const b = e.target.closest("[data-fill]"); if (b) { $("#cmd").value = b.dataset.fill; $("#cmd").focus(); } });
@@ -512,7 +513,9 @@ const dur = s => s >= 3600 ? `${s / 3600 | 0}h ${(s % 3600) / 60 | 0}m` : `${s /
 const stat = (name, value, frac = null) => `<div class="stat"><div class="h"><span class="muted">${name}</span><span class="v ${frac > .85 ? "warn" : ""}">${esc(value)}</span></div>` +
   (frac !== null ? `<div class="meter"><i class="${frac > .85 ? "warn" : ""}" style="width:${Math.min(100, Math.max(0, frac * 100))}%"></i></div>` : "") + `</div>`;
 function onStats(s) {
+  const appsChanged = JSON.stringify(s.apps) !== JSON.stringify(S.stats?.apps);
   S.stats = s;
+  if (appsChanged) renderRecents();
   $("#phoneDot").className = "dot " + (s.phone ? "on" : ""); $("#phoneFoot").title = s.phone ? "Phone linked" : "Phone offline";
   renderStats();
   $("#tPhone").className = $("#phoneDot").className; $("#tPhoneT").textContent = s.phone ? "Phone mic" : "Phone offline";

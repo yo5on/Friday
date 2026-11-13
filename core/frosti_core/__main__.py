@@ -28,6 +28,7 @@ async def main():
         from .voice import Voice
         t = time.time(); voice = Voice(); print(f"[voice] loaded in {time.time() - t:.1f}s", flush=True)
     server = await serve(brain, voice)
+    brain.resume_timers(asyncio.get_running_loop())
     print(f"[gateway] listening on port {server.sockets[0].getsockname()[1]} (token in data/token.txt)", flush=True)
     print(f"[console] open http://127.0.0.1:{server.sockets[0].getsockname()[1]}/ on this laptop", flush=True)
 

@@ -32,7 +32,7 @@ class Brain:
         self.store = store or Store()
         self.history = []        # last few turns, plain text, for follow-ups ("what should I remind you about?")
         self.sessions = set()    # connected front-ends, for notifications
-        self.timers = []         # [{"due", "label"}] for the Memory screen; lost on restart like the timers themselves
+        self.timers = self.store.timers()  # [{"id", "due", "label"}]; stored, so they survive a Core restart
         TOOLS["remember"].run = lambda fact: (self.store.remember(fact) or "Noted.", fact)
         TOOLS["recall"].run = self._recall
         TOOLS["set_timer"].run = self._timer
@@ -55,15 +55,28 @@ class Brain:
         return f"You have {len(open_)} task{'s' if len(open_) != 1 else ''}: " + "; ".join(open_) + ".", "\n".join(open_)
 
     def _timer(self, minutes, label=""):
-        loop = self.loop
-        msg = f"Timer done{': ' + label if label else ''}."
-        self.timers.append(dict(due=time.time() + minutes * 60, label=label))
-        loop.call_soon_threadsafe(lambda: loop.call_later(minutes * 60, lambda: asyncio.ensure_future(self.broadcast(msg))))
+        t = dict(due=time.time() + minutes * 60, label=label)
+        t["id"] = self.store.add_timer(t["due"], label)
+        self.timers.append(t)
+        self.loop.call_soon_threadsafe(self._schedule, t, 0)
         return f"Timer set for {minutes} minute{'s' if minutes != 1 else ''}{' for ' + label if label else ''}.", ""
 
+    def _schedule(self, t, floor):
+        async def fire():
+            self.store.drop_timer(t["id"])
+            self.timers.remove(t)
+            await self.broadcast(f"Timer done{': ' + t['label'] if t['label'] else ''}.")
+        self.loop.call_later(max(t["due"] - time.time(), floor), lambda: asyncio.ensure_future(fire()))
+
+    def resume_timers(self, loop, overdue_delay=15):
+        """At startup: re-arm stored timers. One that came due while the Core was off fires after overdue_delay,
+        so the phone has time to reconnect and hear it."""
+        self.loop = loop
+        for t in self.timers:
+            self._schedule(t, overdue_delay)
+
     def active_timers(self):
-        self.timers = [t for t in self.timers if t["due"] > time.time()]
-        return self.timers
+        return [t for t in self.timers if t["due"] > time.time()]  # overdue ones stay until fire() announces them
 
     async def broadcast(self, text):
         for s in list(self.sessions):

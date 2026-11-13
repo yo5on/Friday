@@ -10,6 +10,7 @@ class Store:
         self.db.executescript("""
             CREATE VIRTUAL TABLE IF NOT EXISTS facts USING fts5(fact, ts UNINDEXED);
             CREATE TABLE IF NOT EXISTS tasks(text TEXT, ts REAL);
+            CREATE TABLE IF NOT EXISTS timers(due REAL, label TEXT);
             CREATE TABLE IF NOT EXISTS audit(ts REAL, source TEXT, tool TEXT, args TEXT, tier INT, approved INT, result TEXT);
             CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit BEGIN SELECT RAISE(ABORT, 'audit is append-only'); END;
             CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit BEGIN SELECT RAISE(ABORT, 'audit is append-only'); END;
@@ -54,6 +55,32 @@ class Store:
             with self.lock, self.db:
                 self.db.execute("DELETE FROM tasks WHERE rowid = ?", (tasks[hit],))
         return hit
+
+    def add_timer(self, due, label):
+        with self.lock, self.db:
+            return self.db.execute("INSERT INTO timers VALUES (?, ?)", (due, label)).lastrowid
+
+    def timers(self):
+        with self.lock:
+            return [dict(id=r[0], due=r[1], label=r[2]) for r in self.db.execute("SELECT rowid, due, label FROM timers ORDER BY due")]
+
+    def drop_timer(self, rowid):
+        with self.lock, self.db:
+            self.db.execute("DELETE FROM timers WHERE rowid = ?", (rowid,))
+
+    def top_apps(self, k=3):
+        """Most-opened apps as [{label, cmd}] for quick-launch chips; the label is the app's own name ("Opening Notepad.")."""
+        with self.lock:
+            rows = self.db.execute("SELECT args, result FROM audit WHERE tool = 'open_app' AND result LIKE 'Opening %' "
+                                   "ORDER BY ts DESC LIMIT 500").fetchall()  # recent opens only, so old habits fade
+        counts, labels = {}, {}
+        for args, result in rows:
+            a = json.loads(args)
+            key = (a.get("name", "").lower(), a.get("device", "laptop"))
+            counts[key] = counts.get(key, 0) + 1
+            labels.setdefault(key, result[len("Opening "):].rstrip("."))  # newest wording wins
+        top = sorted(counts, key=lambda key: -counts[key])[:k]
+        return [dict(label=labels[key], cmd=f"open {key[0]} on the {key[1]}") for key in top]
 
     def recent(self, k=20):
         with self.lock:

@@ -19,7 +19,7 @@ Protocol (JSON text frames; binary frames = audio):
                 {"type":"log"} -> {"type":"log","entries":[...]} (latest 300 audit rows);
                 {"type":"forget","id"} -> deletes one fact, then {"type":"memory",...}
  laptop console: GET / serves console.html (loopback only); it says {"type":"hello","token","client":"desk"},
-                sees the phone's state/heard/reply/notify mirrored with "src":"phone", and its phone tools go to the phone
+                sees the phone's state/heard/reply/activity mirrored with "src":"phone", and its phone tools go to the phone
 """
 import asyncio, hmac, itertools, json, os, re, secrets, ssl, subprocess, time, urllib.parse
 from http import HTTPStatus
@@ -34,7 +34,7 @@ MEDIA_ACTIONS = {"play", "pause", "next", "previous", "shuffle"}
 from .voice import Listener
 
 STARTED = time.time()
-MIRROR = {"state", "heard", "reply", "notify", "activity"}
+MIRROR = {"state", "heard", "reply", "activity"}  # not notify: broadcast already sends the console its own copy
 
 def token():
     f = DATA / "token.txt"
@@ -180,7 +180,7 @@ class PhoneSession(Session):
                 spawn(self.handle_text(m["text"]))
             elif t == "media" and m.get("action") in MEDIA_ACTIONS:  # desk panel buttons: quiet, no reply
                 try:
-                    await asyncio.wait_for(media_session(m["action"]), 5)
+                    await bounded(media_session(m["action"]), 5)
                     self.brain.store.audit(self.name, "media_control", {"action": m["action"]}, 1, True, "desk panel")
                 except Exception as e:  # no winrt, or the app ignored the button: the next now_playing shows the truth
                     print(f"[media] {m['action']}: {type(e).__name__}: {e}", flush=True)
