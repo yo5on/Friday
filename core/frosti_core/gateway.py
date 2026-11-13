@@ -5,7 +5,8 @@ Protocol (JSON text frames; binary frames = audio):
                 {"type":"listen"} (tap orb); {"type":"played"} (finished playing our audio);
                 {"type":"result","id","text"} (phone tool done); {"type":"confirm","id","ok"};
                 {"type":"media","action":play|pause|next|previous|shuffle} (Music screen buttons; no reply);
-                {"type":"play_track","uri":"spotify:track:…"} (a search result's play button; no reply);
+                {"type":"volume","step":-1|0|1} or {"level":0-100} (laptop volume; step 0 reads it) -> {"type":"volume","level"};
+                {"type":"play_track","uri":"spotify:track:…|spotify:search:…"} (a search result's play button; no reply);
                 binary: 16 kHz mono int16 PCM mic stream
  core -> phone: {"type":"state","state":idle|listening|thinking|speaking}; {"type":"heard","text"};
                 {"type":"reply","rid","text","detail","path","seconds"}; {"type":"tool","id","name","args"};
@@ -20,7 +21,7 @@ Protocol (JSON text frames; binary frames = audio):
  laptop console: GET / serves console.html (loopback only); it says {"type":"hello","token","client":"desk"},
                 sees the phone's state/heard/reply/notify mirrored with "src":"phone", and its phone tools go to the phone
 """
-import asyncio, hmac, itertools, json, os, re, secrets, ssl, time
+import asyncio, hmac, itertools, json, os, re, secrets, ssl, subprocess, time, urllib.parse
 from http import HTTPStatus
 from pathlib import Path
 import psutil
@@ -137,6 +138,19 @@ class PhoneSession(Session):
                 self.listener.idle()
                 await self.send(type="state", state="idle")
 
+    async def press_play(self, uri):
+        """Spotify only opened the search: press that song's Play button in the app (spotify_play.ps1)."""
+        query = urllib.parse.unquote(uri.removeprefix("spotify:search:"))
+        script = Path(__file__).with_name("spotify_play.ps1")
+        try:
+            r = await asyncio.to_thread(subprocess.run, ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), query],
+                                        capture_output=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
+            ok = r.returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            ok = False
+        if not ok:
+            await self.send(type="notify", text=f"Spotify opened {query}, but I couldn't press play; tap the song there.")
+
     async def run(self):
         tasks = set()
         def spawn(coro):  # long work runs beside the receive loop so audio/confirm frames keep flowing
@@ -170,12 +184,14 @@ class PhoneSession(Session):
                     self.brain.store.audit(self.name, "media_control", {"action": m["action"]}, 1, True, "desk panel")
                 except Exception as e:  # no winrt, or the app ignored the button: the next now_playing shows the truth
                     print(f"[media] {m['action']}: {type(e).__name__}: {e}", flush=True)
-            elif t == "play_track" and re.fullmatch(r"spotify:track:[A-Za-z0-9]{22}", str(m.get("uri"))):  # a search result's play button
-                os.startfile(m["uri"])  # the desktop app starts playing a track link it is given; now_playing shows it
+            elif t == "play_track" and re.fullmatch(r"spotify:(track:[A-Za-z0-9]{22}|search:[\w%.~-]{1,300})", str(m.get("uri"))):  # a search result's play button
+                os.startfile(m["uri"])  # a track link starts playing; a search link (no Premium keys) opens Spotify's search for it
+                if m["uri"].startswith("spotify:search:"):
+                    spawn(self.press_play(m["uri"]))
                 self.brain.store.audit(self.name, "play_music", {"uri": m["uri"]}, 1, True, "search result")
-            elif t == "volume" and m.get("step") in (1, -1):  # phone volume buttons: the phone draws its own bar
-                try:
-                    await self.send(type="volume", level=laptop_volume(m["step"]))
+            elif t == "volume" and (m.get("step") in (1, 0, -1) or type(m.get("level")) is int and 0 <= m["level"] <= 100):
+                try:  # phone volume keys step it, the Music slider sets a level, step 0 just reads it
+                    await self.send(type="volume", level=laptop_volume(m.get("step") or 0, m.get("level")))
                 except OSError as e:
                     print(f"[volume] {e}", flush=True)
             elif t == "new":  # console "New chat": drop the follow-up context

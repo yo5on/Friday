@@ -380,7 +380,7 @@ MAP = {
               "git:commit": "desktop", "git:push": "desktop", "run_project": "desktop", "run_project:test": "desktop",
               "run_project:build": "desktop", "run_powershell": "desktop", "power": "desktop", "set_timer": "point",
               "remember": "typing", "tasks": "typing", "recall": "look_around", "describe_screen": "look_around", "forget": "turn_around",
-              "play_music": "hula", "media_control": "dance"},
+              "play_music": "hula", "search_music": "look_around", "media_control": "dance"},
     "reactions": {"done": "done", "celebrate": "celebrate", "chat": "wave", "failed": "facepalm",
                   "notify": "wave", "poke": "excited", "surprised": "excited", "glitch": "disappointed",
                   "go_away": "disappointed", "walk_in": "walk_in", "overheated": "meditate", "low_battery": "disappointed"},

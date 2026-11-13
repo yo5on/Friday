@@ -36,6 +36,8 @@ FAST = [  # utterance -> (tool, args) the fast path must produce
     ("Play Bohemian Rhapsody by Queen.", ("play_music", {"query": "bohemian rhapsody by queen", "device": "phone"})),
     ("play some jazz on my laptop", ("play_music", {"query": "some jazz", "device": "laptop"})),
     ("Play Believer by Imagine Dragons on Spotify.", ("play_music", {"query": "believer by imagine dragons", "device": "laptop"})),
+    ("Search Believer on Spotify.", ("search_music", {"query": "believer"})),
+    ("find songs by queen on spotify", ("search_music", {"query": "songs by queen"})),
     ("pause the music", ("media_control", {"action": "pause", "device": "phone"})),
     ("Resume", ("media_control", {"action": "play", "device": "phone"})),
     ("next song", ("media_control", {"action": "next", "device": "phone"})),
@@ -108,6 +110,8 @@ class Apps(unittest.TestCase):
         self.assertEqual(process_for("vs code", running, self.APPS), ["code.exe"])  # alias
         self.assertEqual(process_for("ode", running, self.APPS), ["code.exe", "codehelper.exe"])  # ambiguous: ask
         self.assertEqual(process_for("ab", running, self.APPS), [])
+        # a Start-menu app with no exe must not match nameless (access-denied) processes
+        self.assertEqual(process_for("notepad", running | {""}, [{"name": "Notepad", "id": "x", "lnk": "", "exe": ""}]), [])
 
     def test_open_app_keeps_trust_boundary(self):
         from frosti_core.tools import open_app
@@ -205,6 +209,16 @@ class BrainPolicy(unittest.TestCase):
         self.assertEqual(asked, [("Shut down the laptop in 5 minutes", 2)])
         self.assertEqual(r["reply"], "Okay, cancelled.")
 
+    def test_kill_confirmation_says_how_many(self):
+        from frosti_core import tools
+        procs = [mock.Mock(info={"name": "chatgpt.exe"})] * 3
+        with mock.patch.object(tools, "kill_target", return_value=([], "chatgpt.exe")), \
+             mock.patch.object(tools.psutil, "process_iter", return_value=procs):
+            r, asked = self.run_("kill chatgpt", approve=False)  # declined, so nothing is killed
+        self.assertEqual(asked, [("Close 3 chatgpt.exe processes", 2)])
+        with mock.patch.object(tools, "kill_target", return_value=(["a.exe", "b.exe"], None)):
+            self.assertEqual(tools.kill_preview("x"), "Kill process x")  # ambiguous: no count
+
     def test_spotify_plays_track_with_preview(self):
         from frosti_core import tools
         track = {"name": "Believer", "uri": "spotify:track:abc", "artists": [{"name": "Imagine Dragons"}],
@@ -231,6 +245,30 @@ class BrainPolicy(unittest.TestCase):
             r, _ = self.run_("play believer on spotify")
         self.assertEqual(opened, ["spotify:search:believer"])
         self.assertEqual(r["reply"], "Searching Spotify for believer.")
+
+    def test_spotify_search_lists_playable_tracks(self):
+        from frosti_core import tools
+        track = {"name": "Believer", "uri": "spotify:track:abc", "artists": [{"name": "Imagine Dragons"}],
+                 "album": {"name": "Evolve", "images": [{"url": "big"}, {"url": "mid"}, {"url": "small"}]}}
+        with mock.patch.object(tools, "spotify_search", return_value=[track, track]) as search, \
+             mock.patch.object(tools, "_fetch", return_value=b"jpg") as fetch:
+            r, _ = self.run_("search believer by imagine dragons on spotify")
+        search.assert_called_once_with("believer imagine dragons", 8)
+        fetch.assert_called_with("small")
+        self.assertEqual(r["media"]["tracks"], [{"title": "Believer", "artist": "Imagine Dragons", "album": "Evolve",
+                                                 "art": "data:image/jpeg;base64,anBn", "uri": "spotify:track:abc"}] * 2)
+
+    def test_song_search_without_spotify_keys_uses_itunes(self):
+        from frosti_core import tools
+        found = json.dumps({"results": [{"trackName": "Punchiri", "artistName": "Eechuu/AC, Suhas & Chris", "collectionName": "Punchiri - Single",
+                                         "artworkUrl60": "small"}]}).encode()
+        with mock.patch.object(tools, "spotify_search", return_value=None), \
+             mock.patch.object(tools, "_fetch", side_effect=[found, b"jpg"]):
+            r, _ = self.run_("search punchiri on spotify")
+        t = r["media"]["tracks"][0]
+        self.assertEqual((t["title"], t["art"]), ("Punchiri", "data:image/jpeg;base64,anBn"))
+        self.assertEqual(t["uri"], "spotify:search:Punchiri%20Eechuu%2FAC")
+        self.assertRegex(t["uri"], r"spotify:(track:[A-Za-z0-9]{22}|search:[\w%.~-]{1,300})")  # what the gateway accepts
 
     def test_task_planner(self):
         self.run_("add task buy milk"); self.run_("add call mom to my to do list")

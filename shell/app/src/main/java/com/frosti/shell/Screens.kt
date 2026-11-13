@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.media.AudioManager
 import android.net.Uri
 import android.provider.Settings
@@ -521,57 +522,85 @@ class MusicScreen(private val a: MainActivity) : Screen {
     private val art = ImageView(a).apply { scaleType = ImageView.ScaleType.CENTER_CROP; clipToOutline = true
         background = pill(Ui.SURFACE, radius = a.dpf(10f)) }
     private val source = a.label("", Ui.ACCENT_DIM, 11f)
-    private val title = a.text(if (a.portrait) 26f else 30f, Ui.TEXT, Ui.SERIF).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
+    private val title = a.text(if (a.portrait) 24f else 26f, Ui.TEXT, Ui.SERIF).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }
     private val artist = a.text(18f, Ui.MUTED).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END }
     private val bar = Meter(a, warn = false)
     private val elapsed = a.label("", Ui.MUTED, 11f)
     private val remain = a.label("", Ui.MUTED, 11f)
     private val shuffle = Icon(a, "shuffle", Ui.MUTED)
     private val play = Icon(a, "play", Ui.BG)
+    private var dragging = false
+    // laptop volume, like Spotify's slider; each move sets the level, the Core answers with the real one
+    private val volume = android.widget.SeekBar(a).apply {
+        max = 100; contentDescription = "Laptop volume"
+        progressTintList = android.content.res.ColorStateList.valueOf(Ui.ACCENT)
+        thumbTintList = android.content.res.ColorStateList.valueOf(Ui.TEXT)
+        progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Ui.LINE)
+        setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(s: android.widget.SeekBar, v: Int, user: Boolean) {
+                if (user) a.send(JSONObject().put("type", "volume").put("level", v))
+            }
+            override fun onStartTrackingTouch(s: android.widget.SeekBar) { dragging = true }
+            override fun onStopTrackingTouch(s: android.widget.SeekBar) { dragging = false }
+        })
+    }
     private var artKey: String? = null
     private var playing = false
     private var ticking = false
 
-    // landscape: big art on the left, one column on the right (words, progress, controls, search);
-    // portrait: art on top, the same column underneath, centred
+    // landscape: the cover as tall as the page on the left, one column beside it (track, progress, controls, volume);
+    // portrait: cover on top, the same column centred underneath. The page takes a wash of the cover's colour.
     override val view: View = FrameLayout(a).apply {
         val p = a.portrait
-        val side = if (p) a.dp(260) else a.dp(220)
+        val dm = a.resources.displayMetrics
+        val side = a.dp(if (p) 240 else minOf((dm.heightPixels / dm.density).toInt() - 72, 240))  // the old column overflowed the 360 dp height
         val words = a.vbox().apply {
             if (p) gravity = Gravity.CENTER_HORIZONTAL
             addView(source)
-            addView(title.apply { if (p) gravity = Gravity.CENTER }, lp().margins(t = a.dp(10)))
-            addView(artist.apply { if (p) gravity = Gravity.CENTER }, lp().margins(t = a.dp(6)))
+            addView(title.apply { if (p) gravity = Gravity.CENTER }, lp().margins(t = a.dp(8)))
+            addView(artist.apply { if (p) gravity = Gravity.CENTER }, lp().margins(t = a.dp(4)))
         }
-        val controls = a.hbox().apply { gravity = if (p) Gravity.CENTER else Gravity.CENTER_VERTICAL }
-        fun button(icon: View, size: Int, bg: Int?, box: Int, onTap: () -> Unit) = controls.addView(FrameLayout(a).apply {
-            if (bg != null) background = pill(bg)
+        // Spotify's row: shuffle · previous · play · next · search; the four small ones share the width left by play
+        val controls = a.hbox().apply { gravity = Gravity.CENTER }
+        fun button(icon: View, size: Int, onTap: () -> Unit) = controls.addView(FrameLayout(a).apply {
             addView(icon, FrameLayout.LayoutParams(size, size, Gravity.CENTER))
-        }.pressable(onTap), lp(box, box).margins(r = a.dp(if (p) 6 else 10), l = if (p) a.dp(6) else 0))
-        button(shuffle, a.dp(20), null, a.dp(52)) { act("shuffle") }
-        button(Icon(a, "prev", Ui.TEXT), a.dp(24), null, a.dp(52)) { act("previous") }
-        button(play, a.dp(26), Ui.ACCENT, a.dp(64)) { act(if (playing) "pause" else "play"); playing = !playing; render() }  // instant; Core corrects it
-        button(Icon(a, "next", Ui.TEXT), a.dp(24), null, a.dp(52)) { act("next") }
-        button(Icon(a, "mic", Ui.MUTED), a.dp(20), null, a.dp(52)) { a.go("talk"); a.send(JSONObject().put("type", "listen")) }
-        val search = a.label("Search Spotify", Ui.TEXT, 11f).apply {
-            gravity = Gravity.CENTER; background = pill(0, a.dp(1), Ui.LINE); setPadding(a.dp(18), a.dp(10), a.dp(18), a.dp(10))
-        }.pressable { a.prompt("Spotify", "Song, artist or album") { a.command("search $it on spotify") } }  // results (with play buttons) land in Talk
+        }.pressable(onTap), lp(0, a.dp(52), 1f))
+        button(shuffle, a.dp(20)) { act("shuffle") }
+        button(Icon(a, "prev", Ui.TEXT), a.dp(22)) { act("previous") }
+        controls.addView(FrameLayout(a).apply { background = pill(Ui.ACCENT); addView(play, FrameLayout.LayoutParams(a.dp(24), a.dp(24), Gravity.CENTER)) }
+            .pressable { act(if (playing) "pause" else "play"); playing = !playing; render() }, lp(a.dp(60), a.dp(60)))  // instant; Core corrects it
+        button(Icon(a, "next", Ui.TEXT), a.dp(22)) { act("next") }
+        button(Icon(a, "search", Ui.MUTED), a.dp(20)) { a.prompt("Spotify", "Song, artist or album") { a.command("search $it on spotify") } }  // results (with play buttons) land in Chat
         val column = a.vbox().apply {
-            if (p) gravity = Gravity.CENTER_HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL or if (p) Gravity.CENTER_HORIZONTAL else 0
             addView(words, lp(-1, -2))
-            addView(bar, lp(-1, a.dp(4)).margins(t = a.dp(if (p) 24 else 28)))
+            addView(bar, lp(-1, a.dp(4)).margins(t = a.dp(22)))
             addView(a.hbox().apply { addView(elapsed, lp(0, -2, 1f)); addView(remain) }, lp(-1, -2).margins(t = a.dp(8)))
-            addView(controls, lp(-1, -2).margins(t = a.dp(14)))
-            addView(search, lp(-2, -2).margins(t = a.dp(14)))
+            addView(controls, lp(-1, -2).margins(t = a.dp(8)))
+            addView(a.hbox().apply {
+                addView(Icon(a, "speaker", Ui.MUTED), lp(a.dp(18), a.dp(18)))
+                addView(volume, lp(0, a.dp(36), 1f))
+            }, lp(-1, -2).margins(t = a.dp(6)))
         }
         val body = if (p) a.vbox().apply { gravity = Gravity.CENTER_HORIZONTAL
-            addView(art, lp(side, side).margins(b = a.dp(26))); addView(column, lp(-1, -2))
-        } else a.hbox().apply { gravity = Gravity.CENTER_VERTICAL
-            addView(art, lp(side, side).margins(r = a.dp(36))); addView(column, lp(0, -2, 1f))
+            addView(art, lp(side, side).margins(b = a.dp(24))); addView(column, lp(-1, -2))
+        } else a.hbox().apply {
+            addView(art, lp(side, side).margins(r = a.dp(28))); addView(column, lp(0, -1, 1f))
         }
         art.elevation = a.dpf(8f)  // lifts the cover off the page
         addView(body, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER).apply {
-            setMargins(a.dp(if (p) 24 else 40), a.dp(16), a.dp(if (p) 24 else 40), a.dp(16)) })
+            setMargins(a.dp(if (p) 24 else 28), a.dp(16), a.dp(if (p) 24 else 28), a.dp(16)) })
+    }
+
+    // Android 9 has no blur: average a 12×12 copy of the cover, mix 30 % of it into the page colour, fade to plain bottom-right
+    private fun wash(b: android.graphics.Bitmap?): android.graphics.drawable.Drawable? {
+        if (b == null) return null
+        val s = android.graphics.Bitmap.createScaledBitmap(b, 12, 12, true)
+        var r = 0; var g = 0; var bl = 0
+        for (x in 0 until 12) for (y in 0 until 12) s.getPixel(x, y).let { r += Color.red(it); g += Color.green(it); bl += Color.blue(it) }
+        fun mix(c: Int, page: Int) = (c / 144 * 0.3f + page * 0.7f).toInt()
+        val tint = Color.rgb(mix(r, Color.red(Ui.BG)), mix(g, Color.green(Ui.BG)), mix(bl, Color.blue(Ui.BG)))
+        return android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TL_BR, intArrayOf(tint, Ui.BG))
     }
 
     private fun act(action: String) {
@@ -585,7 +614,7 @@ class MusicScreen(private val a: MainActivity) : Screen {
         val m = a.media
         if (m == null) {
             source.text = "Laptop"; title.text = "Nothing playing"; artist.text = "Say “play a song on Spotify”."
-            art.setImageDrawable(null); artKey = null; bar.value = -1f; elapsed.text = ""; remain.text = ""
+            art.setImageDrawable(null); artKey = null; view.background = null; bar.value = -1f; elapsed.text = ""; remain.text = ""
             play.kind = "play"; shuffle.visibility = View.INVISIBLE; return
         }
         source.text = "${m.optString("app")} · laptop".uppercase()
@@ -594,7 +623,8 @@ class MusicScreen(private val a: MainActivity) : Screen {
         if (key != artKey) {
             artKey = key
             val bytes = key?.substringAfter("base64,", "")?.let { runCatching { Base64.decode(it, Base64.DEFAULT) }.getOrNull() }
-            art.setImageBitmap(bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) })
+            val bmp = bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+            art.setImageBitmap(bmp); view.background = wash(bmp)
         }
         play.kind = if (playing) "pause" else "play"
         shuffle.visibility = if (m.isNull("shuffle")) View.INVISIBLE else View.VISIBLE
@@ -613,8 +643,12 @@ class MusicScreen(private val a: MainActivity) : Screen {
 
     init { playing = a.media?.optBoolean("playing") == true; render() }
 
-    override fun onShow() { render(); if (!ticking) { ticking = true; view.postDelayed(run, 1000) } }
+    override fun onShow() {
+        render(); if (!ticking) { ticking = true; view.postDelayed(run, 1000) }
+        a.send(JSONObject().put("type", "volume").put("step", 0))  // the slider starts at the laptop's level
+    }
     override fun onEvent(m: JSONObject) {
         if (m.optString("type") == "now_playing") { playing = a.media?.optBoolean("playing") == true; render() }
+        if (m.optString("type") == "volume" && !dragging) volume.progress = m.optInt("level")
     }
 }

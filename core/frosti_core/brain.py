@@ -1,6 +1,6 @@
 """Brain: text in -> fast-path rules -> policy (risk tiers, confirmation) -> tool -> spoken reply."""
 import asyncio, json, re, time
-from . import router
+from . import router, tools
 from .store import Store
 from .tools import TOOLS
 
@@ -22,7 +22,7 @@ def describe(tool, args):
     if tool == "git":
         return f"git {args.get('action')} in {args.get('project')}" + (f": \"{args['message']}\"" if args.get("message") else "")
     if tool == "kill_process":
-        return f"Kill process {args.get('name')}"
+        return tools.kill_preview(args.get("name") or "")
     if tool == "power" and args.get("action") == "shutdown":
         return f"Shut down the laptop in {args.get('minutes') or 0} minutes"
     return f"{tool} {json.dumps(args)}"

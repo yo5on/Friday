@@ -122,6 +122,11 @@ class Icon(ctx: Context, kind: String, var color: Int = Ui.ACCENT) : View(ctx) {
                 c.drawLine(X(0.64f), Y(0.28f), X(0.86f), Y(0.28f), p)
                 for (yy in floatArrayOf(0.28f, 0.72f)) { c.drawLine(X(0.74f), Y(yy - 0.12f), X(0.86f), Y(yy), p); c.drawLine(X(0.74f), Y(yy + 0.12f), X(0.86f), Y(yy), p) }
             }
+            "speaker" -> {
+                tri(0.12f, 0.5f, 0.5f, 0.16f, 0.5f, 0.84f); o.set(X(0.12f), Y(0.36f), X(0.3f), Y(0.64f))
+                p.style = Paint.Style.FILL; c.drawRect(o, p); p.style = Paint.Style.STROKE
+                o.set(X(0.46f), Y(0.26f), X(0.86f), Y(0.74f)); c.drawArc(o, -55f, 110f, false, p)
+            }
             "note" -> {
                 c.drawCircle(X(0.34f), Y(0.74f), s * 0.13f, p); c.drawLine(X(0.47f), Y(0.74f), X(0.47f), Y(0.16f), p)
                 c.drawLine(X(0.47f), Y(0.16f), X(0.78f), Y(0.26f), p)
@@ -159,6 +164,7 @@ class Icon(ctx: Context, kind: String, var color: Int = Ui.ACCENT) : View(ctx) {
                 o.set(X(0.16f), Y(0.16f), X(0.84f), Y(0.84f)); c.drawRoundRect(o, s * 0.12f, s * 0.12f, p)
                 c.drawLine(X(0.32f), Y(0.52f), X(0.45f), Y(0.65f), p); c.drawLine(X(0.45f), Y(0.65f), X(0.7f), Y(0.36f), p)
             }
+            "search" -> { c.drawCircle(X(0.43f), Y(0.43f), s * 0.25f, p); c.drawLine(X(0.62f), Y(0.62f), X(0.84f), Y(0.84f), p) }
             "send" -> {
                 c.drawLine(X(0.2f), Y(0.5f), X(0.8f), Y(0.5f), p)
                 c.drawLine(X(0.58f), Y(0.28f), X(0.8f), Y(0.5f), p); c.drawLine(X(0.58f), Y(0.72f), X(0.8f), Y(0.5f), p)

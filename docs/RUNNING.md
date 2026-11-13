@@ -74,10 +74,14 @@ It never provisions Device Owner.
 ### Spotify (optional)
 "Play *song* on Spotify" plays the top match in the laptop's Spotify app and shows a
 now-playing card (cover, title, artist) on the phone and the console. Finding the track
-uses Spotify's search API, so it needs the laptop online and a free developer app:
-create one at developer.spotify.com (any redirect URI, Web API), then save
-`data/spotify.json` as `{"client_id": "…", "client_secret": "…"}`. Keep it private; `data/`
-is git-ignored. Without the file, FROSTI opens Spotify's search page instead.
+uses Spotify's search API, so it needs the laptop online and a developer app; Spotify now
+gives the Web API only to Premium accounts. Create one at developer.spotify.com (any redirect
+URI, Web API), then run `scripts/setup-spotify.ps1`. Keep the keys private; `data/` is
+git-ignored. Without keys, "play" opens Spotify's search page, and "search *song* on Spotify"
+lists songs from Apple's free iTunes search; their play button opens Spotify's search for
+that song and presses that row's Play in the laptop's Spotify app through Windows UI
+Automation (`core/frosti_core/spotify_play.ps1`, ~3 s). If Spotify's page changes and it
+can't find the song, FROSTI says so and leaves the search open.
 
 **Music** on the phone is a desk now-playing panel for the laptop: cover, title, artist, a
 live progress bar, and shuffle / previous / play-pause / next buttons. The buttons act on
@@ -156,7 +160,7 @@ Tools:
 - **Phone:** open an app, battery / RAM / storage / temperature, brightness, volume.
 - **Laptop:** open an app, system status, open a folder in VS Code, git, run a project's tests / build / dev server, kill a process, what's running ("what's running", also live on the System screen), sleep now ("put the laptop to sleep"), keep awake / allow sleep, shut down.
 - **Both:** timers, alarms ("set an alarm for 7:30 am", "wake me up at 6"), task planner ("add task buy milk", "what are my tasks", "mark milk as done"; also Memory → Tasks), remember / recall.
-- **Spotify:** "play believer on spotify", or the Search Spotify button on the Music screen.
+- **Spotify:** "play believer on spotify" plays the top match; "search believer on spotify" (or the Search Spotify button on the Music screen) lists up to 8 songs in the chat, each with a play button.
 
 Risk tiers are enforced in code:
 - **Tier 2** (git commit, kill process) needs a tap on the phone.

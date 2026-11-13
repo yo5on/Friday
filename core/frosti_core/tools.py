@@ -225,18 +225,32 @@ def process_for(name, running, apps):
         return [n + ".exe"]
     app = find_app(n, apps)
     exe = Path(app["exe"]).name.lower() if app and app["exe"] else ""
-    if exe in running:
+    if exe and exe in running:  # nameless (access-denied) processes show up as "" too
         return [exe]
     if len(n) < 3:
         return []
     return sorted({p for p in running if n.replace(" ", "") in p.removesuffix(".exe")})
 
-def kill_process(name):
+def kill_target(name):
+    """(matches, exe) for a kill request; exe is None when the name is ambiguous."""
     running = {(p.info["name"] or "").lower() for p in psutil.process_iter(["name"])}
     found = process_for(name, running, start_apps())
     if len(found) > 1:
+        return found, None
+    return found, found[0] if found else name.lower().strip().removesuffix(".exe") + ".exe"
+
+def kill_preview(name):
+    """What the confirmation should say, e.g. 'Close 11 chatgpt.exe processes'."""
+    _, n = kill_target(name)
+    count = sum((p.info["name"] or "").lower() == n for p in psutil.process_iter(["name"])) if n else 0
+    if not count or n == "explorer.exe" or n in PROTECTED:
+        return f"Kill process {name}"
+    return f"Close {count} {n} process{'es' if count != 1 else ''}"
+
+def kill_process(name):
+    found, n = kill_target(name)
+    if n is None:
         return f"{name} could be {', '.join(found)}. Which one?", ""
-    n = found[0] if found else name.lower().strip().removesuffix(".exe") + ".exe"
     if n == "explorer.exe":  # the same process draws the taskbar and desktop, so close only its folder windows
         sh(["powershell", "-NoProfile", "-Command",
             "(New-Object -ComObject Shell.Application).Windows() | ForEach-Object { $_.Quit() }"], timeout=20)
@@ -273,8 +287,9 @@ def _call(obj, slot, *args):
     types = (type(a) if hasattr(type(a), "from_param") else ctypes.c_void_p for a in args)  # byref() args are pointers
     return ctypes.WINFUNCTYPE(ctypes.HRESULT, ctypes.c_void_p, *types)(vtbl[slot])(obj, *args)
 
-def laptop_volume(step):
-    """Move the laptop's master volume by `step` x 5 % (0 just reads it), unmuting; returns the level 0-100.
+def laptop_volume(step=0, level=None):
+    """Move the laptop's master volume by `step` x 5 %, or set it to `level` 0-100 (neither just reads it), unmuting;
+    returns the level 0-100.
     Plain ctypes over Windows Core Audio (IMMDeviceEnumerator -> IMMDevice -> IAudioEndpointVolume): no extra dependency."""
     ole, P = ctypes.windll.ole32, ctypes.c_void_p
     ole.CoInitialize(None)  # per thread; "already initialised" is fine
@@ -287,9 +302,9 @@ def laptop_volume(step):
         _call(enum, 4, ctypes.c_int(0), ctypes.c_int(1), ctypes.byref(dev))  # default render endpoint, multimedia role
         _call(dev, 3, ctypes.byref(_guid("{5CDF2C82-841E-4546-9722-0CF74078229A}")), ctypes.c_ulong(23), P(), ctypes.byref(vol))
         cur = ctypes.c_float(); _call(vol, 9, ctypes.byref(cur))  # GetMasterVolumeLevelScalar
-        if not step:
+        if not step and level is None:
             return round(cur.value * 100)
-        new = min(20, max(0, round(cur.value * 20) + step)) / 20
+        new = min(100, max(0, level)) / 100 if level is not None else min(20, max(0, round(cur.value * 20) + step)) / 20
         _call(vol, 7, ctypes.c_float(new), P())  # SetMasterVolumeLevelScalar
         _call(vol, 14, ctypes.c_int(0), P())     # SetMute(False)
         return round(new * 100)
@@ -332,23 +347,33 @@ def _art(images, i):
         return None
 
 def search_music(query):
-    """Up to 8 Spotify tracks, each with a play button in the chat (the button sends {"type":"play_track","uri"})."""
+    """Up to 8 songs, each with a play button in the chat (the button sends {"type":"play_track","uri"}).
+    With Spotify keys (Web API needs Premium) the button plays the exact track; without them the list comes from
+    Apple's free iTunes search and the button opens Spotify's search for that song."""
+    q = re.sub(r"\s+by\s+", " ", query.strip())
+    why = ""
     try:
-        found = spotify_search(re.sub(r"\s+by\s+", " ", query.strip()), 8)
+        found = spotify_search(q, 8)
     except (OSError, ValueError, KeyError) as e:
-        found, why = None, f"Spotify lookup failed ({e!r}); opened Spotify's search instead."
-    else:
-        why = "Add Spotify keys to data/spotify.json (scripts/setup-spotify.ps1) to list songs here."
-    if found is None:
-        os.startfile(f"spotify:search:{urllib.parse.quote(query.strip())}")
-        return f"Searching Spotify for {query}.", why
-    if not found:
-        return f"I found no songs for {query} on Spotify.", ""
-    with ThreadPoolExecutor(8) as ex:  # smallest cover (~64 px) for each row, fetched side by side
-        arts = list(ex.map(lambda t: _art(t["album"]["images"], 9), found))
-    tracks = [dict(title=t["name"], artist=", ".join(a["name"] for a in t["artists"]), album=t["album"]["name"], art=art, uri=t["uri"])
-              for t, art in zip(found, arts)]
-    return f"Here's what I found for {query}.", "", {"tracks": tracks}
+        found, why = None, f"Spotify lookup failed ({e!r}); used iTunes search instead."
+    with ThreadPoolExecutor(8) as ex:  # smallest cover for each row, fetched side by side
+        if found is not None:
+            arts = list(ex.map(lambda t: _art(t["album"]["images"], 9), found))
+            tracks = [dict(title=t["name"], artist=", ".join(a["name"] for a in t["artists"]), album=t["album"]["name"], art=art, uri=t["uri"])
+                      for t, art in zip(found, arts)]
+        else:
+            try:
+                found = json.loads(_fetch("https://itunes.apple.com/search?entity=song&limit=8&term=" + urllib.parse.quote(q)))["results"]
+            except (OSError, ValueError, KeyError) as e:  # offline: Spotify's own search page is all that's left
+                os.startfile(f"spotify:search:{urllib.parse.quote(query.strip())}")
+                return f"Searching Spotify for {query}.", f"Song search failed ({e!r})."
+            arts = list(ex.map(lambda r: _art([{"url": r["artworkUrl60"]}] if r.get("artworkUrl60") else [], 0), found))
+            tracks = [dict(title=r["trackName"], artist=r["artistName"], album=r.get("collectionName", ""), art=art,
+                           uri="spotify:search:" + urllib.parse.quote(f"{r['trackName']} {re.split(r' *[,&] *', r['artistName'])[0]}", safe=""))
+                      for r, art in zip(found, arts)]
+    if not tracks:
+        return f"I found no songs for {query}.", why
+    return f"Here's what I found for {query}.", why, {"tracks": tracks}
 
 def play_music(query, device="laptop"):
     q = urllib.parse.quote(query.strip())

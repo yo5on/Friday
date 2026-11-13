@@ -122,6 +122,8 @@ button.row:hover{background:var(--surface)}
 .ctrls button.play{width:64px;height:64px;background:var(--cyan)}.ctrls button.play:hover{background:#c6613f}
 .ctrls svg{width:24px;height:24px;fill:currentColor}
 .ctrls .on{color:var(--cyan)}
+.ctrls .vol{display:flex;align-items:center;gap:8px;margin-left:auto;color:var(--muted)}.vol svg{width:20px;height:20px}
+.vol input{width:120px;accent-color:var(--cyan);cursor:pointer}
 .qlist{display:grid;gap:2px;margin-top:10px}
 /* performance tiles */
 .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;max-width:980px;margin-top:22px}
@@ -235,6 +237,8 @@ button:focus-visible,input:focus-visible{outline:1px solid var(--cyan-dim);outli
             <button data-media="toggle" class="play" title="Play / pause"><svg viewBox="0 0 24 24" id="mPlay"><path d="M7 4l13 8-13 8z"/></svg></button>
             <button data-media="next" title="Next"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM5 5l10 7-10 7z"/></svg></button>
             <button data-ask="Song, artist or album" data-tpl="search {} on spotify" title="Search Spotify"><svg viewBox="0 0 24 24"><path d="M10 3a7 7 0 0 1 5.6 11.2l5.1 5.1-1.4 1.4-5.1-5.1A7 7 0 1 1 10 3zm0 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10z"/></svg></button>
+            <label class="vol" title="Laptop volume"><svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4zm12.5-.5a5 5 0 0 1 0 7l-1.4-1.4a3 3 0 0 0 0-4.2z"/></svg>
+              <input type="range" id="mVol" min="0" max="100" value="50" aria-label="Laptop volume"></label>
           </div>
         </div>
       </div>
@@ -347,6 +351,7 @@ function onEvent(m) {
       ctl?.reply({tool: m.tool, detail: m.detail, seconds: m.seconds, spoken: ph});
       break;
     case "now_playing": liveMedia(m.media); break;
+    case "volume": if (document.activeElement !== $("#mVol")) $("#mVol").value = m.level; break;  // don't fight a drag
     case "activity": ctl?.activity(m.name, m.args || {}); break;
     case "notify": ctl?.notify(); addMsg("notice", "Frosti · notice", m.text); break;
     case "confirm": confirmAction(m); break;
@@ -384,7 +389,7 @@ function show(k) {
   S.screen = k;
   $$(".screen").forEach(e => e.classList.toggle("on", e.dataset.s === k));
   $$("[data-nav]").forEach(e => e.classList.toggle("on", e.dataset.nav === k));
-  if (k === "music") renderMusic();
+  if (k === "music") { renderMusic(); send({type: "volume", step: 0}); }  // the slider starts at the laptop's level
   if (k === "processes" || k === "performance") { send({type: "stats"}); renderStats(); }
   if (k === "setup") renderSetup();
   if (k === "talk") setTimeout(() => $("#cmd").focus(), 50);
@@ -500,6 +505,7 @@ document.addEventListener("click", e => {
   if (a === "toggle") { a = S.lastMedia?.playing ? "pause" : "play"; if (S.lastMedia) { S.lastMedia.playing = a === "play"; renderMusic(); } }  // instant; the Core corrects it
   if (!send({type: "media", action: a})) addMsg("notice", "Frosti", "Not linked to the Core.");
 });
+$("#mVol").addEventListener("input", e => send({type: "volume", level: +e.target.value}));
 
 // ---------------- processes + performance (laptop only) ----------------
 const dur = s => s >= 3600 ? `${s / 3600 | 0}h ${(s % 3600) / 60 | 0}m` : `${s / 60 | 0}m ${s % 60}s`;

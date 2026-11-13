@@ -4,8 +4,10 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioRecord
@@ -35,6 +37,7 @@ import org.json.JSONObject
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import java.security.KeyStore
 import java.security.cert.CertificateFactory
@@ -64,8 +67,11 @@ class FrostiService : Service() {
     private val playQueue = LinkedBlockingQueue<ByteArray>()
     private lateinit var actions: Actions
     private var tts: TextToSpeech? = null  // Satellite mode's voice: the phone's own offline TTS
-    private lateinit var cpuLock: PowerManager.WakeLock
-    private lateinit var wifiLock: WifiManager.WifiLock
+    private val screenOn = Semaphore(0)  // the mic thread parks on this while the screen is off
+    private val screenOnReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) = screenOn.release()
+    }
+    private val player = Thread(::playLoop, "play")
     @Volatile var lastState = "offline"; private set
     @Volatile private var streaming = false
     private var failures = 0
@@ -112,24 +118,22 @@ class FrostiService : Service() {
         nm.createNotificationChannel(NotificationChannel("core", "FROSTI link", NotificationManager.IMPORTANCE_MIN))
         startForeground(1, Notification.Builder(this, "core").setContentTitle("FROSTI")
             .setContentText("Listening for \"Frosti\"").setSmallIcon(android.R.drawable.ic_btn_speak_now).build())
-        // On-device wake-word detection must keep working with the screen off; release with the service.
-        cpuLock = getSystemService(PowerManager::class.java)
-            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "frosti:voice").apply { acquire() }
-        wifiLock = (applicationContext.getSystemService(WIFI_SERVICE) as WifiManager)
-            .createWifiLock(WifiManager.WIFI_MODE_FULL, "frosti:voice").apply { acquire() }
+        // No CPU/Wi-Fi locks: voice is screen-on only, so the phone may sleep with the screen off.
         networks.registerNetworkCallback(NetworkRequest.Builder()
             .addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build(), networkCallback)
+        registerReceiver(screenOnReceiver, IntentFilter(Intent.ACTION_SCREEN_ON))
         connect()
         Thread(::micLoop, "mic").start()
-        Thread(::playLoop, "play").start()
+        player.start()
     }
 
     override fun onDestroy() {
         running = false
         main.removeCallbacksAndMessages(null)
         networks.unregisterNetworkCallback(networkCallback)
-        if (::cpuLock.isInitialized && cpuLock.isHeld) cpuLock.release()
-        if (::wifiLock.isInitialized && wifiLock.isHeld) wifiLock.release()
+        unregisterReceiver(screenOnReceiver)
+        screenOn.release()
+        player.interrupt()
         ws?.close(1000, "bye")
         tts?.shutdown()
         instance = null
@@ -228,7 +232,8 @@ class FrostiService : Service() {
             }
         }
         main.removeCallbacks(retry)
-        if (running) main.postDelayed(retry, 3000L)
+        // 3, 6, 12, 24, 48, then 60 s; Wi-Fi coming back still reconnects at once via networkCallback.
+        if (running) main.postDelayed(retry, minOf(60_000L, 3000L shl minOf(failures - 1, 5)))
     }
 
     private fun onCore(m: JSONObject) {
@@ -281,22 +286,33 @@ class FrostiService : Service() {
             android.util.Log.e("FrostiVoice", "Wake runtime unavailable", e)
             emit(JSONObject().put("type", "notify").put("text", "Wake runtime unavailable. Tap to talk.")); null
         }
-        rec.startRecording()
         val buf = ByteArray(3200)  // 100 ms
         var wasIdle = false
         var commandUntil = 0L  // Satellite mode: listening for a command until this uptime
+        var wakeUntil = 0L  // feeding the wake detector until this uptime (sound was heard)
+        val preRoll = ArrayDeque<ByteArray>()
         val beep = ToneGenerator(android.media.AudioManager.STREAM_MUSIC, 80)
         // remove mic recordings left by an old wake-tuning debug build
         listOf("mic.pcm", "mic-prev.pcm").forEach { java.io.File(cacheDir, it).delete() }
+        val power = getSystemService(PowerManager::class.java)
         try {
             while (running) {
+                // Voice only while the screen is on: release the mic when it goes off (a turn already streaming finishes).
+                if (!power.isInteractive && !streaming) {
+                    if (rec.recordingState == AudioRecord.RECORDSTATE_RECORDING) { rec.stop(); micLevel = 0f }
+                    wasIdle = false  // resets the wake detector when the screen comes back
+                    screenOn.drainPermits()
+                    if (!power.isInteractive) screenOn.acquire()  // re-checked after draining so a screen-on can't be missed
+                    continue
+                }
+                if (rec.recordingState != AudioRecord.RECORDSTATE_RECORDING) rec.startRecording()
                 val n = rec.read(buf, 0, buf.size)
                 if (n <= 0) continue
                 micLevel = rms(buf, 0, n)
                 // Offline = laptop unreachable: wake and a fixed command list run on the phone (Satellite mode).
                 val offline = !connected && tts?.isSpeaking != true
                 val idle = (connected && lastState == "idle" && !streaming) || offline
-                if (idle && !wasIdle) { wake?.reset(); commandUntil = 0 }
+                if (idle && !wasIdle) { wake?.reset(); commandUntil = 0; wakeUntil = 0; preRoll.clear() }
                 val now = android.os.SystemClock.uptimeMillis()
                 if (connected && streaming) {
                     ws?.send(buf.toByteString(0, n))
@@ -306,10 +322,20 @@ class FrostiService : Service() {
                         android.util.Log.i("FrostiVoice", "Satellite command $label")
                         Thread { satellite(label) }.start()
                     }
-                } else if (idle && wake?.feed(buf, n) == true) {
-                    android.util.Log.i("FrostiVoice", "Local wake detected")
-                    if (offline) { commandUntil = now + 5000; wake?.reset(); beep.startTone(ToneGenerator.TONE_PROP_BEEP, 150) }
-                    else { lastState = "thinking"; send(JSONObject().put("type", "wake")) }
+                } else if (idle && wake != null) {
+                    // Skip the detector on silence. shortcut: fixed gate (~-49 dBFS raw; far speech measured
+                    // ~-35 dBFS), tune it on the phone if distant wakes start failing.
+                    if (micLevel > 0.03f) {
+                        if (now >= wakeUntil) { wake.reset(); preRoll.forEach { wake.feed(it, it.size) }; preRoll.clear() }
+                        wakeUntil = now + 1500
+                    }
+                    if (now >= wakeUntil) {
+                        preRoll.addLast(buf.copyOf(n)); if (preRoll.size > 3) preRoll.removeFirst()  // 300 ms of lead-in
+                    } else if (wake.feed(buf, n)) {
+                        android.util.Log.i("FrostiVoice", "Local wake detected")
+                        if (offline) { commandUntil = now + 5000; wake.reset(); beep.startTone(ToneGenerator.TONE_PROP_BEEP, 150) }
+                        else { lastState = "thinking"; send(JSONObject().put("type", "wake")) }
+                    }
                 }
                 wasIdle = idle
             }
@@ -326,10 +352,12 @@ class FrostiService : Service() {
     }
 
     private fun playLoop() {
-        while (running) {
-            val wav = playQueue.poll(500, TimeUnit.MILLISECONDS) ?: continue
-            if (wav.isEmpty()) send(JSONObject().put("type", "played")) else play(wav)
-        }
+        try {
+            while (running) {
+                val wav = playQueue.take()  // blocks until audio arrives; onDestroy interrupts it
+                if (wav.isEmpty()) send(JSONObject().put("type", "played")) else play(wav)
+            }
+        } catch (e: InterruptedException) {}
     }
 
     private fun play(wav: ByteArray) {
@@ -349,8 +377,9 @@ class FrostiService : Service() {
         val step = rate * 2 / 25  // 40 ms of 16-bit mono
         speechEnv = FloatArray(pcm.size / step) { rms(pcm, it * step, step) * 1.6f }
         speechAt = android.os.SystemClock.uptimeMillis()
-        track.play()
-        Thread.sleep(pcm.size * 1000L / (rate * 2) + 50)
-        track.release()
+        try {
+            track.play()
+            Thread.sleep(pcm.size * 1000L / (rate * 2) + 50)
+        } finally { track.release() }
     }
 }

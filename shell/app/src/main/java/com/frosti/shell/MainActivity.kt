@@ -249,8 +249,10 @@ class MainActivity : Activity() {
             "stats" -> { stats = m; val ps = m.optJSONObject("phone_stats")
                 frosti.stats(m.optDouble("cpu").takeIf { !it.isNaN() }, ps?.optInt("battery", -1)?.takeIf { it >= 0 }, ps?.optBoolean("charging") == true) }
             "now_playing" -> { media = m.optJSONObject("media"); mediaAt = android.os.SystemClock.elapsedRealtime(); idleMedia() }
-            "volume" -> showVolume("Laptop", m.optInt("level"))
-            "activity" -> frosti.activity(m.optString("name"), m.optJSONObject("args") ?: JSONObject())
+            "volume" -> if (current != "music") showVolume("Laptop", m.optInt("level"))  // Music has its own slider
+            "activity" -> { val args = m.optJSONObject("args") ?: JSONObject()
+                frosti.activity(m.optString("name"), args)
+                if (m.optString("name") == "set_timer") startTimer(args.optDouble("minutes"), args.optString("label")) }
             "reply" -> frosti.reply(if (m.isNull("tool")) null else m.optString("tool"), m.optString("detail"),
                 m.optDouble("seconds", 0.0), spoken = stats?.optBoolean("voice") != false)
             "notify" -> { frosti.alert(); if (m.optString("text").startsWith("Microphone permission")) micOk = false }
@@ -259,10 +261,15 @@ class MainActivity : Activity() {
         screens.values.forEach { it.onEvent(m) }
     }
 
+    private val unlinkedSleep = Runnable { window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+
     private fun setLink(ok: Boolean, why: String?) {
+        val was = linked
         linked = ok
-        // display stays on only while linked to the laptop; offline, the phone sleeps as usual
-        if (ok) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // display stays on only while linked to the laptop; offline, the phone sleeps as usual.
+        // The laptop hotspot drops for a few seconds to minutes (beacon loss), so wait before letting go.
+        if (ok) { h.removeCallbacks(unlinkedSleep); window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+        else if (was) h.postDelayed(unlinkedSleep, 3 * 60_000L)  // later "offline" repeats keep the first deadline
         linkDot.set(if (ok) Ui.ACCENT else if (why == "bad token") Ui.AMBER else Ui.DIM)
         linkText.text = if (ok) "Linked" else if (why == "bad token") "Bad token" else "Offline"
         frosti.setLink(ok, why == "bad token")
@@ -295,6 +302,45 @@ class MainActivity : Activity() {
     fun timer(minutes: String, label: String = "") {
         val result = Actions(this).run("set_timer", JSONObject().put("minutes", minutes).put("label", label))
         android.widget.Toast.makeText(this, result, android.widget.Toast.LENGTH_LONG).show()
+        if (result.startsWith("Timer started")) startTimer(minutes.toDoubleOrNull() ?: 0.0, label)
+    }
+
+    // ---------- timer: a countdown over every screen (and the sleep clock) while one runs ----------
+    // shortcut: shows only the newest timer and forgets it on restart; the Clock app keeps them all (a tap opens it)
+    private var timerDue = 0L  // elapsedRealtime when it rings; 0 = none
+    private var timerName = ""
+    private lateinit var timerBox: View
+    private lateinit var timerLeft: TextView
+    private lateinit var timerLabel: TextView
+    private val timerTick = Runnable { tickTimer() }
+
+    private fun buildTimer(): View {
+        timerLabel = label("", Ui.ACCENT, 9.5f).apply { isSingleLine = true }; timerLeft = text(30f, Ui.TEXT, Ui.THIN)
+        timerBox = hbox().apply {
+            background = pill(Ui.SURFACE, dp(1), Ui.LINE, dpf(16f)); setPadding(dp(14), dp(10), dp(20), dp(10)); visibility = View.GONE
+            addView(Icon(this@MainActivity, "timer", Ui.ACCENT), lp(dp(26), dp(26)).margins(r = dp(12)))
+            addView(vbox().apply { addView(timerLabel, lp(-2, -2)); addView(timerLeft, lp(-2, -2).margins(t = dp(3))) })
+        }.pressable { showTimers() }
+        tickTimer()
+        return timerBox
+    }
+
+    /** Shows the countdown for a timer just set, by voice (the Core's set_timer activity) or by a tap. */
+    fun startTimer(minutes: Double, label: String) {
+        if (minutes.isNaN() || minutes <= 0) return
+        timerDue = android.os.SystemClock.elapsedRealtime() + (minutes * 60_000).toLong(); timerName = label
+        tickTimer()
+    }
+
+    private fun tickTimer() {
+        h.removeCallbacks(timerTick)
+        val left = Math.ceil((timerDue - android.os.SystemClock.elapsedRealtime()) / 1000.0).toLong()
+        if (timerDue == 0L || left < -30) { timerDue = 0; timerBox.visibility = View.GONE; return }  // "Done" stays up 30 s
+        timerBox.visibility = View.VISIBLE
+        timerLabel.text = ((if (left <= 0) "Done" else "Timer") + if (timerName.isBlank()) "" else " · $timerName").uppercase()
+        timerLeft.text = if (left <= 0) "0:00" else if (left >= 3600) "%d:%02d:%02d".format(left / 3600, left % 3600 / 60, left % 60)
+            else "%d:%02d".format(left / 60, left % 60)
+        h.postDelayed(timerTick, 1000)
     }
 
     fun showTimers() {
@@ -490,6 +536,8 @@ class MainActivity : Activity() {
         markNav(current)
         root.addView(buildIdle())
         root.addView(buildVolume(), FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(16) })
+        root.addView(buildTimer(), FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply {
+            topMargin = dp(if (portrait) 56 else 16); rightMargin = dp(16) })  // portrait: below the header
         return root
     }
 
