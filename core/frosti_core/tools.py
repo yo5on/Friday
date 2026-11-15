@@ -516,8 +516,9 @@ def spotify_search(query, limit):
 def _art(images, i):
     """Cover as a data: URI (the phone on the offline hotspot can't reach Spotify's image server); images go largest first."""
     try:
-        # 2 s: a cover is optional, and one slow image shouldn't hold the whole song list for the full 8 s
-        return "data:image/jpeg;base64," + base64.b64encode(_fetch(images[min(i, len(images) - 1)]["url"], timeout=2)).decode() if images else None
+        # 4 s: a cover is optional and shouldn't hold the song list for the full 8 s, but a cold connect to the
+        # image server took 2.1 s here, and at 2 s every cover in the list went missing
+        return "data:image/jpeg;base64," + base64.b64encode(_fetch(images[min(i, len(images) - 1)]["url"], timeout=4)).decode() if images else None
     except OSError:
         return None
 
@@ -569,7 +570,7 @@ def play_music(query, device="laptop"):
     os.startfile(f"https://music.youtube.com/search?q={q}")
     return f"Opening YouTube Music for {query}.", ""
 
-_np = {"key": None, "art": None}
+_np = {"key": None, "art": None, "stale": None, "since": 0.0}
 
 async def now_playing():
     """What the laptop is playing right now (any app, via Windows media sessions), as a media dict plus "playing";
@@ -589,7 +590,8 @@ async def now_playing():
     app = "Spotify" if "spotify" in app.lower() else app
     key = (p.title, p.artist, app)
     if key != _np["key"]:
-        _np.update(key=key, art=None)
+        # right after Next, Windows reports the new title with the old track's cover for a moment: don't keep that one
+        _np.update(key=key, art=None, stale=_np["art"], since=time.monotonic())
     # cover in the background, retried each poll until it lands: a cover read can hang for good (seen with Spotify
     # right at a track change), and awaiting it here froze the phone on the old track
     cover = _np.get("cover")
@@ -606,7 +608,9 @@ async def now_playing():
                 task.add_done_callback(lambda t: t.cancelled() or t.exception())
                 print(f"[media] cover read stuck for {key[0]}; retrying", flush=True)
             elif not task.exception() and _np["key"] == key:
-                _np["art"] = task.result()
+                art = task.result()
+                if art != _np["stale"] or time.monotonic() - _np["since"] > 6:  # after 6 s it's a same-album cover
+                    _np["art"] = art
         _np["cover"] = asyncio.ensure_future(fetch(p.thumbnail))  # held so it isn't garbage-collected mid-read
     info = s.get_playback_info()
     playing = info.playback_status == 4  # GlobalSystemMediaTransportControlsSessionPlaybackStatus.PLAYING

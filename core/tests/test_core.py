@@ -1,8 +1,8 @@
-import asyncio, json, sqlite3, sys, tempfile, time, unittest
+import asyncio, base64, json, sqlite3, sys, tempfile, time, unittest
 from unittest import mock
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from frosti_core import router
+from frosti_core import router, tools
 from frosti_core.brain import Brain, Session
 from frosti_core.store import Store
 
@@ -234,7 +234,7 @@ class BrainPolicy(unittest.TestCase):
              mock.patch.object(tools.os, "startfile", opened.append, create=True):
             r, _ = self.run_("play believer by imagine dragons on spotify")
         search.assert_called_once_with("believer imagine dragons")
-        fetch.assert_called_once_with("mid", timeout=2)
+        fetch.assert_called_once_with("mid", timeout=4)
         self.assertEqual(opened, ["spotify:track:abc"])
         self.assertEqual(r["reply"], "Playing Believer by Imagine Dragons.")
         self.assertEqual(r["media"], {"title": "Believer", "artist": "Imagine Dragons", "album": "Evolve",
@@ -258,7 +258,7 @@ class BrainPolicy(unittest.TestCase):
              mock.patch.object(tools, "_fetch", return_value=b"jpg") as fetch:
             r, _ = self.run_("search believer by imagine dragons on spotify")
         search.assert_called_once_with("believer imagine dragons", 8)
-        fetch.assert_called_with("small", timeout=2)
+        fetch.assert_called_with("small", timeout=4)
         self.assertEqual(r["media"]["tracks"], [{"title": "Believer", "artist": "Imagine Dragons", "album": "Evolve",
                                                  "art": "data:image/jpeg;base64,anBn", "uri": "spotify:track:abc"}] * 2)
 
@@ -445,6 +445,40 @@ class NowPlayingPush(unittest.TestCase):
                 asyncio.run(gateway.watch_media(brain, every=0))
         self.assertEqual([json.loads(m)["media"]["position"] for m in WS.sent], [10, 60])  # drift ignored, seek pushed
         self.assertEqual(brain.now_playing["position"], 61)  # late joiners get the fresh position
+
+    def test_next_drops_the_old_cover(self):
+        from types import SimpleNamespace as NS
+        from datetime import timedelta
+        now = {"title": "A", "cover": b"a"}
+        async def done(v): return v
+        class Stream:
+            def __init__(self, data): self.data, self.size, self.content_type = data, len(data), "image/png"
+            def read_async(self, buf, n, opt): buf[:] = self.data; return done(None)
+        session = NS(source_app_user_model_id="Spotify.exe",
+                     try_get_media_properties_async=lambda: done(NS(title=now["title"], artist="X", album_title="",
+                         thumbnail=NS(open_read_async=lambda: done(Stream(now["cover"]))))),
+                     get_playback_info=lambda: NS(playback_status=5, is_shuffle_active=False, controls=NS(is_shuffle_enabled=False)),
+                     get_timeline_properties=lambda: NS(start_time=timedelta(0), end_time=timedelta(0), position=timedelta(0)))
+        control = NS(GlobalSystemMediaTransportControlsSessionManager=NS(request_async=lambda: done(NS(get_current_session=lambda: session))))
+        class Buf(bytearray): capacity = 0
+        streams = NS(Buffer=Buf, InputStreamOptions=NS(READ_AHEAD=1))
+        b64 = lambda b: "data:image/png;base64," + base64.b64encode(b).decode()
+        async def art():
+            await tools.now_playing(); await asyncio.sleep(0.1)  # the cover lands in the background
+            return (await tools.now_playing())["art"]
+        async def run():
+            self.assertEqual(await art(), b64(b"a"))
+            now["title"] = "B"  # Next: new title, still the old cover
+            self.assertIsNone(await art())
+            now["cover"] = b"b"
+            self.assertEqual(await art(), b64(b"b"))
+            now.update(title="C", cover=b"b")  # same album, same cover: kept once the wait is over
+            self.assertIsNone(await art())
+            tools._np["since"] -= 10
+            self.assertEqual(await art(), b64(b"b"))
+        with mock.patch.dict(sys.modules, {"winrt": NS(), "winrt.windows.media.control": control,
+                                           "winrt.windows.storage.streams": streams}):
+            asyncio.run(run())
 
     def test_hung_read_does_not_freeze_the_feed(self):
         from frosti_core import gateway

@@ -31,8 +31,8 @@ for ($i = 0; $i -lt 30; $i++) {
         if (-not $play) { continue }
         $s = 0; $qt = $q
         for ($m = $k + 1; $m -lt [Math]::Min($k + 6, $all.Count); $m++) {
-            $a = $names[$m]
-            if ($types[$m] -eq $Link -and $a -and $q.EndsWith(" $a")) { $s = 1000; $qt = $q.Substring(0, $q.Length - $a.Length - 1); break }
+            $artist = $names[$m]  # not $a: PowerShell names ignore case, and $a would overwrite $A above
+            if ($types[$m] -eq $Link -and $artist -and $q.EndsWith(" $artist")) { $s = 1000; $qt = $q.Substring(0, $q.Length - $artist.Length - 1); break }
         }
         # a shorter Spotify title ("Neeye" for "Neeye Punchiri - One Side Love") counts only with the artist or most of the name
         $short = $qt.StartsWith($t) -and ($s -ge 1000 -or $t.Length * 2 -ge $qt.Length)
