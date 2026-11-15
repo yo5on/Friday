@@ -5,9 +5,16 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'core'))
-from frosti_core.voice import Voice, SR
+import sherpa_onnx
+from frosti_core import CONFIG
+from frosti_core.voice import Voice, SR, _one
 
 voice = Voice()
+v = Path(CONFIG['speech']['models']) / CONFIG['speech']['voice']
+if not (v / 'voices.bin').exists():  # Piper/VITS samples random noise; zero it so every run makes the same clips
+    voice.tts = sherpa_onnx.OfflineTts(sherpa_onnx.OfflineTtsConfig(model=sherpa_onnx.OfflineTtsModelConfig(
+        vits=sherpa_onnx.OfflineTtsVitsModelConfig(model=_one(v, '*.onnx'), tokens=str(v / 'tokens.txt'),
+                                                   data_dir=str(v / 'espeak-ng-data'), noise_scale=0.0, noise_scale_w=0.0))))
 directory = ROOT / 'data' / 'wake-tests'
 directory.mkdir(exist_ok=True)
 for name, text in [('frosti', 'Frosti.'), ('hey-frosti', 'Hey Frosti.'),
