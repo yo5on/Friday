@@ -385,7 +385,8 @@ def kill_process(name):
             p.kill()
         except psutil.Error:
             pass
-    return (f"Closed {len(procs)} {n} process{'es' if len(procs) != 1 else ''}." if procs else f"No {n} is running."), ""
+    # Chromium/Electron apps (ChatGPT, Chrome, Discord) run one process per tab, GPU, helper: one app, many processes
+    return (f"Closed {n.removesuffix('.exe')}{f' ({len(procs)} processes)' if len(procs) > 1 else ''}." if procs else f"No {n} is running."), ""
 
 MEDIA_KEYS = {"play": 0xB3, "pause": 0xB3, "next": 0xB0, "previous": 0xB1}  # play and pause share the toggle key
 

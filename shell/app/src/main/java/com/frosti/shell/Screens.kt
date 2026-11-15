@@ -484,6 +484,12 @@ class TalkScreen(private val a: MainActivity) : Screen {
     override fun onShow() { refresh(); view.post(live) }
     override fun tick() = refresh()
 
+    /** Rotation rebuilds every screen: carry the chat over from the old Talk instead of starting blank. */
+    fun adopt(old: TalkScreen) {
+        while (old.log.childCount > 0) old.log.getChildAt(0).also { old.log.removeViewAt(0); log.addView(it) }
+        empty(); scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+    }
+
     override fun onEvent(m: JSONObject) {
         when (m.optString("type")) {
             "ui_state", "conn" -> refresh()

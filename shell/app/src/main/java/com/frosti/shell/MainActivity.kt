@@ -157,7 +157,9 @@ class MainActivity : Activity() {
     override fun onConfigurationChanged(c: android.content.res.Configuration) {
         super.onConfigurationChanged(c)
         hideIdle(); cores.clear(); navItems.clear()
+        val oldTalk = screens["talk"] as? TalkScreen
         setContentView(build())
+        oldTalk?.let { (screens["talk"] as? TalkScreen)?.adopt(it) }
         setLink(linked, null); setState(coreState)
         screens[current]?.onShow()  // the rebuilt screen never went through go(): start its clock and volume read
     }
