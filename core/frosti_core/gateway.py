@@ -21,14 +21,14 @@ Protocol (JSON text frames; binary frames = audio):
  laptop console: GET / serves console.html (loopback only); it says {"type":"hello","token","client":"desk"},
                 sees the phone's state/heard/reply/activity mirrored with "src":"phone", and its phone tools go to the phone
 """
-import asyncio, hmac, itertools, json, os, re, secrets, ssl, subprocess, time, urllib.parse
+import asyncio, hmac, itertools, json, os, re, secrets, ssl, time, urllib.parse
 from http import HTTPStatus
 from pathlib import Path
 import psutil
 import websockets
 from . import CONFIG, DATA
 from .brain import Brain, Session, sentences
-from .tools import PROJECTS, browse_start, git_repos, laptop_brightness, laptop_volume, list_dirs, repo_info, media_session, now_playing, top_processes_cached
+from .tools import PROJECTS, browse_start, git_repos, laptop_brightness, laptop_volume, list_dirs, repo_info, media_session, now_playing, spotify_press_play, start_apps, top_processes_cached
 
 MEDIA_ACTIONS = {"play", "pause", "next", "previous", "shuffle"}
 GIT_ACTIONS = {"commit", "pull", "push", "fetch", "switch"}  # the git view's buttons
@@ -142,14 +142,7 @@ class PhoneSession(Session):
     async def press_play(self, uri):
         """Spotify only opened the search: press that song's Play button in the app (spotify_play.ps1)."""
         query = urllib.parse.unquote(uri.removeprefix("spotify:search:"))
-        script = Path(__file__).with_name("spotify_play.ps1")
-        try:
-            r = await asyncio.to_thread(subprocess.run, ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), query],
-                                        capture_output=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
-            ok = r.returncode == 0
-        except (OSError, subprocess.TimeoutExpired):
-            ok = False
-        if not ok:
+        if not await asyncio.to_thread(spotify_press_play, query):
             await self.send(type="notify", text=f"Spotify opened {query}, but I couldn't press play; tap the song there.")
 
     async def repo(self, m):
@@ -361,6 +354,7 @@ async def serve(brain, voice):
         except OSError:
             pass  # no built-in screen
     asyncio.get_running_loop().run_in_executor(None, warm)
+    asyncio.get_running_loop().run_in_executor(None, start_apps)  # read the Start menu now, not on the first "open" command
     brain.media_watch = asyncio.create_task(watch_media(brain))
     brain.media_watch.add_done_callback(lambda t: t.cancelled() or print(f"[media] watcher stopped: {t.exception()!r}", flush=True))
 

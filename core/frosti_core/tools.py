@@ -56,26 +56,50 @@ START_APPS_PS = r"""$s = New-Object -ComObject WScript.Shell
 @{apps = @(Get-StartApps | Select-Object Name, AppID)
   lnks = @(Get-ChildItem "$env:ProgramData\Microsoft\Windows\Start Menu", "$env:APPDATA\Microsoft\Windows\Start Menu" -Recurse -Filter *.lnk |
            ForEach-Object { @{n = $_.BaseName; p = $_.FullName; t = $s.CreateShortcut($_.FullName).TargetPath} })} | ConvertTo-Json -Compress -Depth 3"""
-_apps = {"t": 0, "list": []}
+_apps = {"t": 0, "list": None, "busy": threading.Lock()}
+APPS_FILE = DATA / "start_apps.json"
 
 def start_apps():
-    """Start-menu apps as [{name, id (shell:AppsFolder AppID), lnk, exe}], cached for 10 minutes."""
-    if time.time() - _apps["t"] > 600:
-        rc, out = sh(["powershell", "-NoProfile", "-Command", START_APPS_PS], timeout=30)
+    """Start-menu apps as [{name, id (shell:AppsFolder AppID), lnk, exe}]. Reading them takes ~10 s, and over 30 s on a
+    busy laptop after boot, so commands answer from the last list (kept on disk) while a fresh one loads every 10 minutes."""
+    if _apps["list"] is None:
         try:
-            data = json.loads(out) if rc == 0 else {}
-        except json.JSONDecodeError:
-            data = {}
-        lnks = {l["n"].lower(): l for l in data.get("lnks") or []}
-        apps = [{"name": a["Name"], "id": a["AppID"]} for a in data.get("apps") or []]
-        known = {a["name"].lower() for a in apps}
-        apps += [{"name": l["n"], "id": None} for k, l in lnks.items() if k not in known]
-        for a in apps:
-            l = lnks.get(a["name"].lower(), {})
-            exe = l.get("t") or (a["id"] if (a["id"] or "").lower().endswith(".exe") else "")
-            a.update(lnk=l.get("p"), exe=exe if exe.lower().endswith(".exe") else "")
-        _apps.update(t=time.time(), list=[a for a in apps if "uninstall" not in a["name"].lower()])
-    return _apps["list"]
+            _apps["list"] = json.loads(APPS_FILE.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            pass
+    if time.time() - _apps["t"] > 600 and _apps["busy"].acquire(blocking=False):
+        def refresh():
+            try:
+                _read_start_apps()
+            except (OSError, ValueError, subprocess.TimeoutExpired) as e:
+                print(f"[apps] Start menu read failed, keeping the last list: {e!r}", flush=True)
+                _apps["t"] = time.time() - 540  # try again in a minute
+            finally:
+                _apps["busy"].release()
+        if _apps["list"] is None:
+            refresh()  # nothing saved yet: this first command has to wait for it
+        else:
+            threading.Thread(target=refresh, daemon=True).start()
+    return _apps["list"] or []
+
+def _read_start_apps():
+    rc, out = sh(["powershell", "-NoProfile", "-Command", START_APPS_PS], timeout=90)
+    data = json.loads(out) if rc == 0 else None
+    if not isinstance(data, dict) or not data.get("apps"):  # a failed read must not replace a good list with nothing
+        raise ValueError(f"Get-StartApps gave nothing (exit {rc})")
+    lnks = {l["n"].lower(): l for l in data.get("lnks") or []}
+    apps = [{"name": a["Name"], "id": a["AppID"]} for a in data["apps"]]
+    known = {a["name"].lower() for a in apps}
+    apps += [{"name": l["n"], "id": None} for k, l in lnks.items() if k not in known]
+    for a in apps:
+        l = lnks.get(a["name"].lower(), {})
+        exe = l.get("t") or (a["id"] if (a["id"] or "").lower().endswith(".exe") else "")
+        a.update(lnk=l.get("p"), exe=exe if exe.lower().endswith(".exe") else "")
+    _apps.update(t=time.time(), list=[a for a in apps if "uninstall" not in a["name"].lower()])
+    try:
+        APPS_FILE.write_text(json.dumps(_apps["list"]), encoding="utf-8")
+    except OSError:
+        pass  # only the next boot is slower
 
 def find_app(name, apps):
     """Fuzzy match a spoken name to a Start-menu entry: exact, then whole words (shortest label), then close spelling."""
@@ -349,6 +373,8 @@ def process_for(name, running, apps):
     exe = Path(app["exe"]).name.lower() if app and app["exe"] else ""
     if exe and exe in running:  # nameless (access-denied) processes show up as "" too
         return [exe]
+    if exe == n + ".exe":  # an installed app that isn't running: "code" must not fall through to codex-....exe
+        return []
     if len(n) < 3:
         return []
     return sorted({p for p in running if n.replace(" ", "") in p.removesuffix(".exe")})
@@ -394,8 +420,17 @@ def media_control(action, device="laptop"):
     vk = MEDIA_KEYS.get(action)
     if vk is None:
         return f"I can't do {action} on the music.", ""
-    for flags in (0, 2):  # key down, key up
-        ctypes.windll.user32.keybd_event(vk, 0, flags, 0)
+    # the media session, not the key: play and pause share one toggle key, so "pause" twice resumed the music
+    res = []
+    def go():
+        try:
+            res.append(asyncio.run(media_session(action)) is not False)
+        except Exception as e:  # no winrt packages, or Windows refused
+            res.append(e)
+    t = threading.Thread(target=go, daemon=True); t.start(); t.join(5)  # a hung WinRT call ignores cancel: leave it behind
+    if res and res[0] is not True:
+        for flags in (0, 2):  # key down, key up
+            ctypes.windll.user32.keybd_event(vk, 0, flags, 0)
     return {"next": "Next track.", "previous": "Previous track."}.get(action, "Okay."), ""
 
 class _GUID(ctypes.Structure):
@@ -551,17 +586,28 @@ def search_music(query):
         return f"I found no songs for {query}.", why
     return f"Here's what I found for {query}.", why, {"tracks": tracks}
 
+def spotify_press_play(query):
+    """Spotify only has its search page open: press the best row's Play like a user would (spotify_play.ps1). True if it played."""
+    try:
+        return subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(Path(__file__).with_name("spotify_play.ps1")),
+                               query], capture_output=True, timeout=30, creationflags=NO_WINDOW).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
 def play_music(query, device="laptop"):
-    q = urllib.parse.quote(query.strip())
+    plain = re.sub(r"\s+by\s+", " ", query.strip())  # "<title> <artist>", the form spotify_play.ps1 matches rows against
+    q = urllib.parse.quote(plain)
     if any(a["name"].lower() == "spotify" for a in start_apps()):
         try:
-            track = spotify_track(re.sub(r"\s+by\s+", " ", query.strip()))
-            why = "Add Spotify keys to data/spotify.json to play songs directly."
+            track = spotify_track(plain)
+            why = ""
         except (OSError, ValueError, KeyError) as e:  # offline, Spotify down, or a broken keys file: search instead
             track, why = None, f"Spotify lookup failed ({e!r}); searched instead."
-        if not track:
+        if not track:  # no Premium keys: open the search and press Play on the best match
             os.startfile(f"spotify:search:{q}")
-            return f"Searching Spotify for {query}.", why
+            if spotify_press_play(plain):
+                return f"Playing {query} on Spotify.", why
+            return f"I opened Spotify's search for {query}, but couldn't press play. Tap the song there.", why
         os.startfile(track["uri"])  # the desktop app starts playing a track link it is given
         artist = ", ".join(a["name"] for a in track["artists"])
         art = _art(track["album"]["images"], 1)  # ~300 px is enough for the card
@@ -630,7 +676,7 @@ async def media_session(action):
     from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager as Manager
     s = (await Manager.request_async()).get_current_session()
     if not s:
-        return
+        return False  # nothing has played yet (Spotify just opened): media_control falls back to the key
     if action == "shuffle":
         await s.try_change_shuffle_active_async(not s.get_playback_info().is_shuffle_active)
     else:

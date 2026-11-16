@@ -592,7 +592,7 @@ function trackList(tracks) {  // Spotify search results under the reply; ▶ pla
   const log = $("#log"); log.lastElementChild.append(c); log.scrollTop = log.scrollHeight;
 }
 function liveMedia(md) {  // only the latest card follows the laptop; when playback stops it keeps the last track, paused
-  if (md) S.lastMedia = md;
+  if (md) S.lastMedia = md; else if (S.lastMedia) S.lastMedia = {...S.lastMedia, playing: false};
   if (S.mediaCard?.isConnected && S.lastMedia) fillMedia(S.mediaCard, S.lastMedia, !!md?.playing);
   S.mediaAt = Date.now();
   renderMusic();

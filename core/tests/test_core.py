@@ -1,4 +1,4 @@
-import asyncio, base64, json, sqlite3, sys, tempfile, time, unittest
+import asyncio, base64, json, sqlite3, sys, tempfile, threading, time, unittest
 from unittest import mock
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -114,8 +114,40 @@ class Apps(unittest.TestCase):
         self.assertEqual(process_for("vs code", running, self.APPS), ["code.exe"])  # alias
         self.assertEqual(process_for("ode", running, self.APPS), ["code.exe", "codehelper.exe"])  # ambiguous: ask
         self.assertEqual(process_for("ab", running, self.APPS), [])
+        vscode = [{"name": "Visual Studio Code", "id": "x", "lnk": "Code.lnk", "exe": r"D:\VS Code\Code.exe"}]
+        self.assertEqual(process_for("code", {"codex-windows-sandbox-service.exe"}, vscode), [])  # not running: no lookalike
         # a Start-menu app with no exe must not match nameless (access-denied) processes
         self.assertEqual(process_for("notepad", running | {""}, [{"name": "Notepad", "id": "x", "lnk": "", "exe": ""}]), [])
+
+    def test_start_apps_answers_from_saved_list(self):
+        import tempfile, subprocess
+        from pathlib import Path
+        from frosti_core import tools
+        saved = [{"name": "Spotify", "id": "s", "lnk": None, "exe": ""}]
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "apps.json"; f.write_text(json.dumps(saved), encoding="utf-8")
+            fresh = {"t": 0, "list": None, "busy": threading.Lock()}
+            for failure in (subprocess.TimeoutExpired("powershell", 90), (1, "")):  # a hung read, then an empty one
+                slow = mock.Mock(side_effect=failure) if isinstance(failure, Exception) else mock.Mock(return_value=failure)
+                with mock.patch.object(tools, "_apps", fresh), mock.patch.object(tools, "APPS_FILE", f), mock.patch.object(tools, "sh", slow):
+                    fresh["t"] = 0
+                    self.assertEqual(tools.start_apps(), saved)  # answered from disk, not after the read
+                    with fresh["busy"]:  # wait for the background refresh to finish
+                        pass
+                    self.assertEqual(tools.start_apps(), saved)  # the failed read kept the list
+            ok = (0, json.dumps({"apps": [{"Name": "Notepad", "AppID": "n"}], "lnks": []}))
+            with mock.patch.object(tools, "_apps", {"t": 0, "list": None, "busy": threading.Lock()}), \
+                 mock.patch.object(tools, "APPS_FILE", Path(d) / "none.json"), mock.patch.object(tools, "sh", return_value=ok):
+                self.assertEqual([a["name"] for a in tools.start_apps()], ["Notepad"])  # nothing saved: waits once
+            self.assertEqual(json.loads((Path(d) / "none.json").read_text())[0]["name"], "Notepad")
+
+    def test_media_control_uses_session_then_key(self):
+        from frosti_core import tools
+        for session, pressed in ((mock.AsyncMock(return_value=None), False), (mock.AsyncMock(return_value=False), True),
+                                 (mock.AsyncMock(side_effect=ImportError), True)):  # ok / no session / no winrt
+            with mock.patch.object(tools, "media_session", session), mock.patch.object(tools.ctypes, "windll") as w:
+                self.assertEqual(tools.media_control("pause")[0], "Okay.")
+            self.assertEqual(w.user32.keybd_event.called, pressed)
 
     def test_open_app_keeps_trust_boundary(self):
         from frosti_core.tools import open_app
@@ -246,9 +278,14 @@ class BrainPolicy(unittest.TestCase):
         with mock.patch.object(tools, "start_apps", return_value=[{"name": "Spotify"}]), \
              mock.patch.object(tools, "spotify_track", side_effect=OSError("offline")), \
              mock.patch.object(tools.os, "startfile", opened.append, create=True):
-            r, _ = self.run_("play believer on spotify")
-        self.assertEqual(opened, ["spotify:search:believer"])
-        self.assertEqual(r["reply"], "Searching Spotify for believer.")
+            with mock.patch.object(tools, "spotify_press_play", return_value=True) as press:
+                r, _ = self.run_("play believer by imagine dragons on spotify")
+            press.assert_called_once_with("believer imagine dragons")
+            self.assertEqual(r["reply"], "Playing believer by imagine dragons on Spotify.")
+            with mock.patch.object(tools, "spotify_press_play", return_value=False):
+                r, _ = self.run_("play believer on spotify")
+        self.assertEqual(opened, ["spotify:search:believer%20imagine%20dragons", "spotify:search:believer"])
+        self.assertIn("couldn't press play", r["reply"])
 
     def test_spotify_search_lists_playable_tracks(self):
         from frosti_core import tools

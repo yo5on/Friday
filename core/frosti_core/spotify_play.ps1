@@ -6,7 +6,9 @@ $A = [System.Windows.Automation.AutomationElement]
 $Desc = [System.Windows.Automation.TreeScope]::Descendants
 $q = $Query.ToLower()
 $want = 'search for ' + ($q -replace ' ', '+')  # the page title Spotify gives this search
-for ($i = 0; $i -lt 30; $i++) {
+$clock = [Diagnostics.Stopwatch]::StartNew()
+# time, not rounds: a cold Spotify start takes ~15 s, and each tree read is slow on a busy laptop. Under the caller's 30 s
+while ($clock.Elapsed.TotalSeconds -lt 25) {
     Start-Sleep -Milliseconds 400
     $p = Get-Process Spotify -ErrorAction SilentlyContinue | Where-Object MainWindowTitle | Select-Object -First 1
     if (-not $p) { continue }
@@ -19,7 +21,7 @@ for ($i = 0; $i -lt 30; $i++) {
     # read once; elements vanish while the page redraws, so a failed read is just an empty slot
     $names = @(foreach ($e in $all) { try { ([string]$e.Current.Name).ToLower() } catch { '' } })
     $types = @(foreach ($e in $all) { try { $e.Current.ControlType } catch { $null } })
-    if (-not ($names | Where-Object { $_.StartsWith($want) }) -and $i -lt 10) { continue }  # wait for this search's page, not the last one
+    if (-not ($names | Where-Object { $_.StartsWith($want) }) -and $clock.Elapsed.TotalSeconds -lt 15) { continue }  # wait for this search's page, not the last one
     $best = $null; $score = 0
     for ($k = 0; $k -lt $all.Count; $k++) {
         $t = $names[$k]
