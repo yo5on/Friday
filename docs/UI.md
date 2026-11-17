@@ -1,13 +1,13 @@
-# FROSTI interface: design system
+# FRIDAY interface: design system
 
-FROSTI has two faces: the **phone Shell** (Galaxy J7 Pro, Android 9, a 720×1280 AMOLED panel) and the **laptop console**
+FRIDAY has two faces: the **phone Shell** (Galaxy J7 Pro, Android 9, a 720×1280 AMOLED panel) and the **laptop console**
 (a page the Core serves at `http://127.0.0.1:8765/`). They share one identity, one set of screens and one
 protocol, so the user moves between them without relearning anything.
 
 ## What we borrowed from Clawd_Handy (as ideas, not assets)
-Clawd_Handy (vikas-meu) feels like a companion rather than an app. These are the patterns behind that, and how FROSTI uses each one:
+Clawd_Handy (vikas-meu) feels like a companion rather than an app. These are the patterns behind that, and how FRIDAY uses each one:
 
-| Clawd_Handy pattern | FROSTI's take |
+| Clawd_Handy pattern | FRIDAY's take |
 |---|---|
 | A character whose face reacts (eyes, moods) | **The Core**: an energy orb with two light "eyes" that blink, glance around, widen when listening, narrow when thinking, smile when speaking and close when asleep |
 | A boot sequence before the first screen | Rings sweep in, the nucleus ignites, the eyes open, and a three-line boot log reports core, link and voice |
@@ -15,10 +15,10 @@ Clawd_Handy (vikas-meu) feels like a companion rather than an app. These are the
 | An idle clock with the character asleep | An ambient clock that dims the screen, with the Core breathing and its eyes closed; the text stays still (Claude charcoal background; dimming is off by default because this AMOLED tints dark colours blue when dimmed) |
 | Hint lines that name what each control does | A one-line caption under the Core that always says what a tap or hold will do |
 
-FROSTI's mascot is an original pixel penguin, not Clawd.
+FRIDAY's mascot is an original pixel penguin, not Clawd.
 
 ## Tokens (Claude-style)
-FROSTI uses the look of the Claude app and the Clawd_Handy screens, at the owner's request: clay accent, warm cream text, serif display type, a spark logo and a pixel creature.
+FRIDAY uses the look of the Claude app and the Clawd_Handy screens, at the owner's request: clay accent, warm cream text, serif display type, a spark logo and a pixel creature.
 
 | Token | Value | Use |
 |---|---|---|
@@ -32,7 +32,7 @@ FROSTI uses the look of the Claude app and the Clawd_Handy screens, at the owner
 | `sleep` | `#262624` | The idle clock: same Claude charcoal as every screen, at normal brightness |
 
 Type:
-- **Serif** (Noto Serif on Android, Georgia on the laptop): titles, greeting and FROSTI's replies.
+- **Serif** (Noto Serif on Android, Georgia on the laptop): titles, greeting and FRIDAY's replies.
 - **Thin sans:** clocks.
 - **Mono, uppercase, tracked:** labels and navigation.
 
@@ -45,7 +45,7 @@ The phone app runs landscape by default (either way up); **Setup › Appearance 
 - **Git view** (a folder picked there): the name in serif, the path in mono, then chips for the branch, sync (↑ to push, ↓ to pull, in sync, not on GitHub) and changes; a bar of four tiles (Pull, Push, Fetch, PRs & CI); a card listing changed files (new green, edited ochre, deleted amber) with a clay **Commit N changes** button; a Branch card to switch; and **History**: the last 40 commits of all branches as a lane graph (one colour per lane, curved merge lines, a hollow dot for HEAD) with branch tags, message and age. Actions run as the `git` tool, so commit and push still ask for confirmation. On the far right the phone has a mic you hold to talk, which turns into send once you type; the laptop has send.
 - **Music:** large album art beside one column (on the laptop, a card tinted by the blurred cover; on the phone, the cover is as tall as the page over a blur of itself under a dark scrim): title, artist, a progress bar, one control row (shuffle, previous, an ivory play/pause, next, search Spotify) and a full-width volume slider with its percentage (the laptop's volume) for whatever the laptop plays. Spotify Free ignores skip and shuffle during ads.
 - **Timer (phone):** setting a timer, by voice or the + menu, shows a one-line chip at the top right of every screen and the sleep clock: a clay ring that empties as time runs out, the time and the label. It turns amber and reads "Done" for 30 s after it rings; a tap opens the Clock app's timers. Only the newest timer shows.
-- **Processes:** the laptop's busiest programs (up to 12, same-name processes summed), each with a bar for its memory share; tap one to close it, after FROSTI confirms.
+- **Processes:** the laptop's busiest programs (up to 12, same-name processes summed), each with a bar for its memory share; tap one to close it, after FRIDAY confirms.
 - **Performance:** tiles (one big number, a detail line, a meter; amber only where high is bad, so never battery), the laptop only: processor, memory, storage (system drive), battery, network and, on the console, Core uptime.
 - **Sleep screen:** while the laptop plays something, a card with the album art, title and artist shows under the date; touching it opens Music.
 - **Screen on:** the phone keeps its display on only while linked to the laptop; offline, its normal screen timeout applies.
@@ -66,7 +66,7 @@ It is a 16 × 8 pixel penguin: one chunky near-black block (`#141413`, so it rea
 On boot, the spark spins up, then the body builds up row by row and the eyes open.
 
 ### Only Clawd's moves
-Apart from the core states above (idle, listening, speaking, offline, sleep, asking permission), Frosti only does what Clawd does in the Claude app, in its own penguin pixels: the motion was studied from Clawd's emotes, nothing was copied (`[C]` in `author.py`). It can face left as well as right (frame `side=-1`, the side-on shape mirrored).
+Apart from the core states above (idle, listening, speaking, offline, sleep, asking permission), Friday only does what Clawd does in the Claude app, in its own penguin pixels: the motion was studied from Clawd's emotes, nothing was copied (`[C]` in `author.py`). It can face left as well as right (frame `side=-1`, the side-on shape mirrored).
 
 | Where it plays | Animations |
 |---|---|
@@ -96,6 +96,6 @@ Budget:
 ## Protocol additions (backwards compatible)
 - **Stats:** phone → core `{"type":"stats","phone":{…}}` returns `{"type":"stats",…}`: laptop CPU, RAM, battery, network counters, voice and the phone link.
 - **Memory:** `{"type":"memory"}` returns `{"type":"memory",facts,recent,history,projects,timers}`.
-- **Activity:** core → clients `{"type":"activity","name","args"}` as a tool starts, and `reply` carries `tool`, so the character can act the tool out and react to how it went (`core/frosti_core/anim/`, played by `frosti.js` on the laptop and `CoreView.kt` on the phone).
+- **Activity:** core → clients `{"type":"activity","name","args"}` as a tool starts, and `reply` carries `tool`, so the character can act the tool out and react to how it went (`core/friday_core/anim/`, played by `friday.js` on the laptop and `CoreView.kt` on the phone).
 - **Forgetting a fact:** `{"type":"forget","id"}` deletes one fact (and audits it), then returns `memory`.
 - **The laptop console:** opens with `{"type":"hello","token","client":"desk"}`. It sees the phone's conversation mirrored, and its phone tools route to the phone.

@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot
 $settings = Get-Content (Join-Path $root 'data/wireless.json') -Raw | ConvertFrom-Json
 if (-not (Test-Path $settings.python)) { throw 'Core interpreter not found.' }
-$rule = 'FROSTI offline hotspot TLS'
+$rule = 'FRIDAY offline hotspot TLS'
 $program = & $settings.python -c 'import sys; print(sys._base_executable)'
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $program)) { throw 'Could not resolve the Core interpreter.' }
 if (-not (Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue)) {
@@ -14,5 +14,5 @@ $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfil
 $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
 $options = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
-Register-ScheduledTask -TaskName 'FROSTI wireless' -Action $action -Trigger $trigger -Settings $options -User $user -RunLevel Limited -Force | Out-Null
-Write-Host 'FROSTI will start its hotspot and Core at sign-in.'
+Register-ScheduledTask -TaskName 'FRIDAY wireless' -Action $action -Trigger $trigger -Settings $options -User $user -RunLevel Limited -Force | Out-Null
+Write-Host 'FRIDAY will start its hotspot and Core at sign-in.'

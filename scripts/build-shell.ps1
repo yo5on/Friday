@@ -1,4 +1,4 @@
-# Builds the FROSTI Shell APK -> shell\app\build\outputs\apk\debug\app-debug.apk
+# Builds the FRIDAY Shell APK -> shell\app\build\outputs\apk\debug\app-debug.apk
 # Toolchain lives on D: (JDK 17, Android SDK 34, Gradle 8.7); Gradle cache also on D: (E: is small).
 $ErrorActionPreference = 'Stop'
 $env:JAVA_HOME = 'D:\frosti-tools\jdk17'

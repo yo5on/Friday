@@ -15,7 +15,7 @@ DATA = Path(__file__).resolve().parents[1] / "data"
 
 def certificate(host):
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "FROSTI laptop")])
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "FRIDAY laptop")])
     now = datetime.datetime.now(datetime.timezone.utc)
     cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
             .public_key(key.public_key()).serial_number(x509.random_serial_number())
@@ -42,6 +42,6 @@ if __name__ == "__main__":
         serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
     (DATA / "wireless.pem").write_bytes(cert.public_bytes(serialization.Encoding.PEM))
     (DATA / "wireless.cer").write_bytes(cert.public_bytes(serialization.Encoding.DER))
-    settings_path.write_text(json.dumps(dict(ssid="FROSTI", password=secrets.token_urlsafe(18),
+    settings_path.write_text(json.dumps(dict(ssid="FRIDAY", password=secrets.token_urlsafe(18),
                                             host=host, python=str(Path(args.python).resolve())), indent=2))
     print("Wireless identity created. Hotspot credentials are in data/wireless.json.")

@@ -1,0 +1,751 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FRIDAY Console</title>
+<!-- Served by the Core on 127.0.0.1 only (gateway.console_page). No external assets: works offline. -->
+<style>
+:root{
+  --bg:#262624;--rail:#1f1e1d;--surface:#30302e;--line:#3d3d3a;--cyan:#d97757;--cyan-dim:rgba(217,119,87,.55);--amber:#e8b931;
+  --text:#faf9f5;--muted:#9c9a92;--dim:#73726c;
+  --serif:"Tiempos Text",Georgia,"Times New Roman",serif;
+  --thin:"Segoe UI Variable Display","Segoe UI Light","Segoe UI",system-ui,sans-serif;
+  --mono:"Cascadia Mono","Cascadia Code",Consolas,ui-monospace,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--text);font:15px/1.5 var(--thin);font-weight:300;-webkit-font-smoothing:antialiased}
+*{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+.label{font:500 10.5px/1 var(--mono);letter-spacing:.15em;text-transform:uppercase;color:var(--muted)}
+.cyan{color:var(--cyan)}.amber{color:var(--amber)}.muted{color:var(--muted)}.dim{color:var(--dim)}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--dim);vertical-align:middle}
+.dot.on{background:var(--cyan);box-shadow:0 0 8px var(--cyan)}.dot.warn{background:var(--amber)}
+
+/* layout: slim icon rail beside the screen */
+.app{display:grid;grid-template-columns:84px 1fr;height:100%}
+nav.rail{display:flex;flex-direction:column;align-items:center;padding:16px 8px 18px;border-right:1px solid var(--line);background:var(--rail)}
+.brand{padding:0 0 16px}
+.brand canvas{width:30px;height:30px;display:block}
+.newchat{width:40px;height:40px;border-radius:50%;background:var(--cyan);color:var(--bg);font:500 24px/1 var(--thin);display:grid;place-items:center;margin-bottom:18px;transition:background .15s}
+.newchat:hover{background:#c6613f}
+.nav{display:flex;flex-direction:column;gap:8px;width:100%}
+.nav button{display:flex;flex-direction:column;align-items:center;gap:6px;padding:11px 0 10px;border-radius:12px;
+  font:400 11px var(--thin);color:var(--muted);transition:color .15s,background .15s}
+.nav svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.nav button:hover{color:var(--text);background:rgba(250,249,245,.04)}
+.nav button.on{color:var(--text);background:var(--surface)}
+.nav button.on svg{stroke:var(--cyan)}
+.rail .foot{margin-top:auto;display:flex;flex-direction:column;gap:12px;align-items:center}
+.rail .foot .label{display:flex;flex-direction:column;align-items:center;gap:6px;font:400 10.5px var(--thin);letter-spacing:0;text-transform:none}
+main{position:relative;overflow:hidden}
+.screen{position:absolute;inset:0;overflow:auto;padding:36px 48px 40px;display:none}
+.screen.on{display:block;animation:rise .18s cubic-bezier(.2,.8,.2,1)}
+@keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+h1{font:400 40px/1.1 var(--serif);letter-spacing:-.01em}
+.sub{color:var(--muted);margin:8px 0 6px}
+.section{margin:34px 0 10px;color:var(--cyan-dim)}
+
+.clock{font:100 96px/1 var(--thin);letter-spacing:-.02em}
+.state{font:500 12px var(--mono);letter-spacing:.3em;color:var(--cyan)}
+.hint{color:var(--muted);margin-top:8px}
+.quick{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:16px}
+.quick button{font:400 13.5px var(--thin);color:var(--muted);padding:8px 14px;border-radius:12px;border:1px solid var(--line);transition:color .15s,border-color .15s}
+.quick button:hover{color:var(--text);border-color:var(--cyan-dim)}
+
+/* rows / stats */
+.row{display:flex;align-items:center;gap:16px;padding:13px 4px;border-radius:10px}
+button.row{width:100%;text-align:left}
+button.row:hover{background:var(--surface)}
+.row .t{flex:1;min-width:0}.row .t div:first-child{font-size:16px}
+.row .t .label{margin-top:5px;letter-spacing:.06em;text-transform:none}
+.tag{font:500 10px var(--mono);letter-spacing:.15em;text-transform:uppercase;color:var(--cyan)}
+.tag.amber{color:var(--amber)}
+.stat{padding:12px 0}
+.stat .h{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.stat .v{font-size:15px}.stat .v.warn{color:var(--amber)}
+.meter{height:3px;background:var(--line);margin-top:9px}.meter i{display:block;height:100%;width:0;background:var(--cyan);transition:width .5s}
+.meter i.warn{background:var(--amber)}
+.spark{width:100%;height:46px;margin-top:8px;display:block}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:8px 56px}
+
+/* talk */
+/* chat: one screen. Empty, it is the "new chat" page (penguin, greeting, box, starters, centred);
+   once you talk, the penguin moves into a header above the conversation. */
+.screen[data-s=talk]{padding:20px 48px 24px}
+.talk{display:flex;flex-direction:column;height:100%;max-width:780px;margin:0 auto}
+.talkhead{display:flex;align-items:center;gap:22px}
+.talkhead canvas{width:224px;height:98px;cursor:pointer}
+.ind{display:flex;gap:18px;align-items:center;margin-top:14px}
+.log{flex:1;min-height:0;overflow:auto;padding:18px 0;scroll-behavior:smooth;display:flex;flex-direction:column}
+.talk .greet,.talk .quick,.talk .ehint{display:none}
+.talk.empty .talkhead{flex-direction:column;margin-top:auto}
+.talk.empty .talkhead canvas{width:min(320px,80%);height:auto;aspect-ratio:448/196}
+.talk.empty .talkhead>div,.talk.empty .ehint{display:none}
+.talk.empty .ehint{display:block;text-align:center}
+.talk.empty .greet{display:block;text-align:center;font:400 40px/1.15 var(--serif);margin-top:18px}
+.talk.empty .log{display:none}
+.talk.empty .input{margin-top:26px}
+.talk.empty .quick{display:flex;margin-bottom:auto}
+.msg{padding:10px 0;animation:rise .2s ease-out}
+.msg .who{margin-bottom:5px}
+.msg .body{font:400 18px/1.5 var(--serif);white-space:pre-wrap}.msg.you{align-self:flex-end;max-width:80%}.msg.you .body{color:var(--text);font:300 16px var(--thin);background:var(--surface);padding:10px 16px;border-radius:16px}
+.msg .det{font:11px/1.5 var(--mono);color:var(--dim);margin-top:6px;white-space:pre-wrap}
+.media{display:flex;gap:14px;align-items:center;margin-top:10px;padding:10px;max-width:420px;background:var(--surface);border:1px solid var(--line);border-radius:12px}
+.media img,.media .noart{width:64px;height:64px;border-radius:8px;flex:none;object-fit:cover;background:var(--line)}
+.media .t{min-width:0}.media .tt{font:400 16px/1.3 var(--serif);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.media .ar{font:300 13px/1.4 var(--thin);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tracks .media{margin-top:6px;padding:6px 10px}.tracks .media img,.tracks .media .noart{width:44px;height:44px}.tracks .media .t{flex:1}
+.tracks .play{flex:none;width:36px;height:36px;border-radius:50%;border:0;background:var(--cyan);display:grid;place-items:center;cursor:pointer}
+.tracks .play svg{width:16px;height:16px;fill:var(--bg)}
+.input{display:flex;align-items:center;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:0 6px;box-shadow:0 4px 20px rgba(0,0,0,.18);transition:border-color .15s}
+.input:focus-within{border-color:var(--cyan-dim)}.input input:focus-visible{outline:0}
+.input input{flex:1;background:none;border:0;outline:0;color:var(--text);font:300 16px var(--thin);height:52px}
+.input input::placeholder{color:var(--dim)}
+.plus{width:40px;height:40px;border-radius:10px;font:200 28px/1 var(--thin);color:var(--text);display:grid;place-items:center}.plus:hover{background:rgba(250,249,245,.06)}
+.send{width:40px;height:40px;border-radius:10px;display:grid;place-items:center}.send{background:var(--cyan)}.send:hover{background:#c6613f}
+.send svg{width:20px;height:20px;stroke:var(--text);fill:none;stroke-width:1.8;stroke-linecap:round}
+
+/* music */
+.player{position:relative;display:flex;gap:44px;align-items:center;max-width:980px;margin-top:28px;padding:30px;border:1px solid var(--line);border-radius:22px;overflow:hidden;background:var(--surface)}
+.player>*{position:relative}.player .bg{position:absolute;inset:-40px;background:center/cover no-repeat;filter:blur(50px) saturate(1.3);opacity:.28;pointer-events:none}
+.player .art{width:280px;height:280px;border-radius:14px;background:var(--line);object-fit:cover;flex:none;box-shadow:0 18px 40px rgba(0,0,0,.45)}
+.player .t{flex:1;min-width:0}
+.player .tt{font:400 38px/1.15 var(--serif);margin-top:10px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.player .ar{font-size:19px;color:var(--muted);margin-top:8px}
+.player .meter{margin-top:30px;height:4px}
+.player .times{display:flex;justify-content:space-between;margin-top:8px}
+.ctrls{display:flex;gap:14px;align-items:center;margin-top:22px}
+.ctrls button{width:52px;height:52px;border-radius:50%;display:grid;place-items:center;color:var(--text)}
+.ctrls button:hover{background:var(--surface)}
+.ctrls button.play{width:64px;height:64px;background:var(--cyan)}.ctrls button.play:hover{background:#c6613f}
+.ctrls svg{width:24px;height:24px;fill:currentColor}
+.ctrls .on{color:var(--cyan)}
+.ctrls .vol{display:flex;align-items:center;gap:8px;margin-left:auto;color:var(--muted)}.vol svg{width:20px;height:20px}
+.vol input{width:120px;accent-color:var(--cyan);cursor:pointer}
+.qlist{display:grid;gap:2px;margin-top:10px}
+.lrow{display:grid;grid-template-columns:1fr auto;gap:6px 12px;margin-top:14px}
+.lrow input{grid-row:2;grid-column:1/-1;width:100%;accent-color:var(--cyan);cursor:pointer}
+#dialog{max-height:85vh;overflow-y:auto}
+/* git view */
+.dialog.wide{width:min(620px,calc(100vw - 32px))}
+.ghead{display:flex;align-items:flex-start;justify-content:space-between}
+.gname{font:400 24px/1.15 var(--serif);color:var(--text)}.gpath{font:12px var(--mono);color:var(--dim);margin-top:4px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
+.chip{display:inline-flex;align-items:center;gap:6px;font:12.5px var(--thin);color:var(--text);background:var(--bg);border-radius:999px;padding:5px 11px}
+.chip svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.chip.br{color:var(--cyan);font-weight:600;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block}.chip.br svg{vertical-align:-2px;margin-right:6px}.chip.dim{color:var(--muted)}.chip.warn{color:var(--amber)}
+.gnote{font:13px/1.45 var(--thin);color:var(--cyan);margin-top:10px;white-space:pre-wrap;min-height:4px}.gnote.bad{color:var(--amber)}
+.gbar{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+.gbar button{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 4px;border-radius:12px;background:var(--bg);color:var(--text);font:12.5px var(--thin)}
+.gbar button:hover{background:#1f1e1d;color:var(--cyan)}
+.gbar svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.gcard{background:var(--bg);border-radius:14px;padding:14px;margin-top:12px}
+.gsub{font:500 10.5px var(--mono);letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.gfiles{font:12.5px/1.7 var(--mono);color:var(--text);max-height:120px;overflow:auto}
+.fk{display:inline-block;width:64px;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.fk.new,.fk.added{color:#788c5d}.fk.edited{color:#c2a35a}.fk.deleted{color:var(--amber)}
+.dialog textarea{width:100%;resize:vertical;background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:14px/1.4 var(--thin);margin-top:10px;outline:0}
+.dialog textarea:focus{border-color:var(--cyan-dim)}
+.gprimary{width:100%;margin-top:8px;padding:11px;border-radius:10px;background:var(--cyan);color:var(--text);font:600 14px var(--thin)}.gprimary:hover{background:#c6613f}
+.gform{display:flex;gap:8px}
+.gform select{flex:1;min-width:0;background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:9px 10px;font:14px var(--thin)}
+.gform button{padding:9px 16px;border-radius:10px;border:1px solid var(--line);color:var(--text);font:14px var(--thin)}.gform button:hover{border-color:var(--cyan)}
+.ggraph{background:var(--bg);border-radius:14px;padding:6px 10px;max-height:340px;overflow:auto}
+.grow{display:flex;align-items:center;gap:8px;height:30px}.grow svg{flex:none}
+.gmsg{min-width:0;flex:1;display:flex;align-items:baseline;gap:10px}
+.gsubj{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font:13.5px var(--thin);color:var(--text)}
+.gmeta{flex:none;font:11px var(--mono);color:var(--dim)}
+.ref{display:inline-block;max-width:45%;overflow:hidden;text-overflow:ellipsis;vertical-align:-4px;font:600 11px var(--thin);color:var(--c);border:1px solid var(--c);border-radius:999px;padding:0 7px;margin-right:6px;line-height:17px}
+.ref.remote{opacity:.6;font-weight:400}
+@media (max-width:520px){.gmeta{display:none}}
+/* performance tiles */
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;max-width:980px;margin-top:22px}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px 20px}
+.tile .big{font:200 44px/1.1 var(--thin);margin-top:12px;white-space:nowrap}.tile .big.warn{color:var(--amber)}
+.tile .sub{color:var(--muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .meter{margin-top:16px;height:4px}
+.procbar{height:2px;background:var(--line);margin:0 4px 6px}.procbar i{display:block;height:100%;background:var(--cyan)}
+/* idle: now playing card, a click opens Music */
+.idlesong{display:none;align-items:center;gap:14px;margin-top:22px;padding:10px 20px 10px 10px;background:var(--surface);border:1px solid var(--line);border-radius:16px;text-align:left;cursor:pointer;max-width:min(520px,86vw)}
+.idlesong.on{display:flex}.idlesong img{width:64px;height:64px;border-radius:10px;object-fit:cover;background:var(--line);flex:none}
+.idlesong .tt{font:400 19px/1.3 var(--serif);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.idlesong .ar{color:var(--muted);font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.idlesong span{min-width:0}
+/* memory chips */
+.chips{display:flex;gap:6px;margin:14px 0 4px}
+.chips button{font:500 10px var(--mono);letter-spacing:.15em;text-transform:uppercase;color:var(--muted);padding:9px 15px;border-radius:999px;border:1px solid transparent}
+.chips button.on{color:var(--cyan);border-color:var(--cyan-dim);background:var(--surface)}
+.empty{color:var(--muted);padding:20px 4px}
+.range{width:100%;accent-color:var(--cyan)}
+
+/* overlays */
+.overlay{position:fixed;inset:0;background:var(--bg);display:none;z-index:10}
+.overlay.on{display:grid;place-items:center}
+#boot .box,#idle .box{display:flex;flex-direction:column;align-items:center}
+#boot canvas{width:320px;height:140px}
+#boot .word{font:600 26px var(--mono);letter-spacing:.9em;margin:20px 0 0 .9em;opacity:0;transition:opacity .6s,letter-spacing .9s cubic-bezier(.2,.8,.2,1)}
+#boot .word.in{opacity:1;letter-spacing:.45em}
+#boot .log{opacity:1;margin-top:26px;display:grid;gap:7px;padding:0}
+#boot .log div{opacity:0;transition:opacity .2s}#boot .log div.in{opacity:1}
+#idle{cursor:none;background:#000}
+#idle .box{transition:transform 2s ease}
+#idle canvas{width:256px;height:112px}
+#idle .clock{font-size:clamp(96px,16vw,180px);margin-top:8px}
+#idle .date{color:var(--muted);font-size:20px;margin-top:6px}
+#modal{background:rgba(0,0,0,.55);backdrop-filter:blur(3px)}
+.dialog{width:min(440px,calc(100vw - 32px));background:var(--surface);box-shadow:0 20px 60px rgba(0,0,0,.4);border:1px solid var(--line);border-radius:18px;padding:24px}
+.dialog.amber{border-color:var(--amber);color:var(--text)}
+button:focus-visible,input:focus-visible{outline:1px solid var(--cyan-dim);outline-offset:2px}
+.dialog p{margin:12px 0 18px;font-size:16px}
+.dialog input{width:100%;background:var(--bg);border:0;outline:0;border-radius:12px;padding:12px 16px;color:var(--text);font:300 16px var(--thin);margin:12px 0 18px}
+.dialog .btns{display:flex;justify-content:flex-end;gap:8px}
+.dialog .btns button{font:500 11px var(--mono);letter-spacing:.15em;text-transform:uppercase;padding:10px 14px;border-radius:10px;color:var(--muted)}
+.dialog .btns button.go{color:var(--cyan)}.dialog.amber .btns button.go{color:var(--amber)}
+.dialog .btns button:hover{background:var(--surface)}
+
+@media (max-width:860px){
+  .player{flex-direction:column;align-items:stretch;gap:22px;padding:22px}.player .art{width:min(100%,300px);height:auto;aspect-ratio:1;align-self:center}
+  .app{grid-template-columns:1fr;grid-template-rows:1fr auto}
+  nav.rail{flex-direction:row;padding:6px 8px 10px;border-right:0;border-top:1px solid var(--line);order:2}
+  .rail .foot{display:none}
+  .nav{flex-direction:row}.nav button{flex:1;padding:8px 2px;font-size:10px}
+  .screen,.screen[data-s=talk]{padding:24px 16px 20px}
+  .talk.empty .greet{font-size:30px}
+  .clock{font-size:64px}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="rail">
+    <div class="nav" id="nav"></div>
+    <div class="foot">
+      <div class="label" id="linkFoot"><span class="dot" id="linkDot"></span><span id="linkText">Offline</span></div>
+      <div class="label" id="phoneFoot"><span class="dot" id="phoneDot"></span><span id="phoneText">Phone</span></div>
+    </div>
+  </nav>
+  <main>
+    <!-- CHAT (empty = the "new chat" page) -->
+    <section class="screen" data-s="talk">
+      <div class="talk empty" id="talk">
+        <div class="talkhead">
+          <canvas id="talkCore" width="896" height="392" title="Poke Friday"></canvas>
+          <div>
+            <div class="state" data-state style="font-size:14px"></div>
+            <div class="hint" data-hint></div>
+            <div class="ind label">
+              <span><span class="dot" id="tLink"></span>&nbsp; <span id="tLinkT">Core</span></span>
+              <span><span class="dot" id="tPhone"></span>&nbsp; <span id="tPhoneT">Phone mic</span></span>
+              <span id="meta" class="dim"></span>
+            </div>
+          </div>
+        </div>
+        <div class="greet" id="greet"></div>
+        <div class="hint ehint" data-hint></div>
+        <div class="log" id="log"></div>
+        <form class="input" id="form" autocomplete="off">
+          <button type="button" class="plus" id="plusBtn" title="Quick actions" aria-label="Quick actions">+</button>
+          <input id="cmd" placeholder="Ask Friday anything" aria-label="Command">
+          <button type="button" class="plus" id="lapBtn" title="Laptop: brightness, GitHub" aria-label="Laptop settings"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/></svg></button>
+          <button class="send" aria-label="Send"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+        </form>
+        <div class="quick" id="starters"></div>
+      </div>
+    </section>
+
+    <!-- MUSIC: whatever the laptop plays -->
+    <section class="screen" data-s="music">
+      <h1>Music</h1><div class="sub">Whatever the laptop is playing.</div>
+      <div class="player"><div class="bg" id="mBg"></div>
+        <img class="art" id="mArt" alt="">
+        <div class="t">
+          <div class="label cyan" id="mSrc"></div>
+          <div class="tt" id="mTitle"></div>
+          <div class="ar" id="mArtist"></div>
+          <div class="meter"><i id="mBar"></i></div>
+          <div class="times label"><span id="mPos"></span><span id="mLeft"></span></div>
+          <div class="ctrls">
+            <button data-media="shuffle" id="mShuf" title="Shuffle"><svg viewBox="0 0 24 24"><path d="M3 7h4l9 10h3v-2l3 3-3 3v-2h-4L6 9H3zm0 10h4l2-2.3 1.4 1.6L8 19H3zm13-8h3V7l3 3-3 3v-2h-3l-2 2.2-1.3-1.5z"/></svg></button>
+            <button data-media="previous" title="Previous"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zm3 7 10-7v14z"/></svg></button>
+            <button data-media="toggle" class="play" title="Play / pause"><svg viewBox="0 0 24 24" id="mPlay"><path d="M7 4l13 8-13 8z"/></svg></button>
+            <button data-media="next" title="Next"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM5 5l10 7-10 7z"/></svg></button>
+            <button data-ask="Song, artist or album" data-tpl="search {} on spotify" title="Search Spotify"><svg viewBox="0 0 24 24"><path d="M10 3a7 7 0 0 1 5.6 11.2l5.1 5.1-1.4 1.4-5.1-5.1A7 7 0 1 1 10 3zm0 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10z"/></svg></button>
+            <label class="vol" title="Laptop volume"><svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4zm12.5-.5a5 5 0 0 1 0 7l-1.4-1.4a3 3 0 0 0 0-4.2z"/></svg>
+              <input type="range" id="mVol" min="0" max="100" value="50" aria-label="Laptop volume"></label>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PROCESSES: what the laptop is busy with -->
+    <section class="screen" data-s="processes">
+      <h1>Processes</h1><div class="sub">Busiest programs on the laptop. Close one and FRIDAY asks first.</div>
+      <div id="procs" style="max-width:860px;margin-top:18px"></div>
+    </section>
+
+    <!-- PERFORMANCE: the laptop only -->
+    <section class="screen" data-s="performance">
+      <h1>Performance</h1><div class="sub">The laptop, live.</div>
+      <div class="tiles" id="perf"></div>
+    </section>
+
+    <!-- SETUP -->
+    <section class="screen" data-s="setup">
+      <h1>Setup</h1><div class="sub">Status and look.</div>
+      <div class="grid" id="setup"></div>
+    </section>
+  </main>
+
+</div>
+
+<div class="overlay" id="boot"><div class="box">
+  <canvas id="bootCore" width="640" height="280"></canvas>
+  <div class="word">FRIDAY</div>
+  <div class="label cyan" style="margin-top:12px;opacity:.6">Personal core</div>
+  <div class="log label" id="bootLog"></div>
+</div></div>
+
+<div class="overlay" id="idle"><div class="box">
+  <canvas id="idleCore" width="512" height="224"></canvas>
+  <div class="clock" data-clock></div>
+  <div class="date" data-date></div>
+  <button class="idlesong" id="idleSong" title="Open Music"><img id="idleArt" alt=""><span><div class="label cyan">Now playing</div><div class="tt" id="idleTitle"></div><div class="ar" id="idleArtist"></div></span></button>
+  <div class="label dim" id="idleInfo" style="margin-top:30px"></div>
+</div></div>
+
+<div class="overlay" id="modal"><div class="dialog" id="dialog"></div></div>
+
+<script src="/friday.js"></script>
+<script>
+"use strict";
+const TOKEN = "__FRIDAY_TOKEN__";
+const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pref = (k, d) => { try { const v = localStorage.getItem("friday." + k); return v === null ? d : JSON.parse(v); } catch { return d; } };
+const setPref = (k, v) => { try { localStorage.setItem("friday." + k, JSON.stringify(v)); } catch {} };
+
+// ---------------- the character: friday.js plays friday_anims.json, the same data the phone's CoreView plays ----------------
+function spark(g, cx, cy, r, rot, color) {
+  g.strokeStyle = color; g.lineWidth = r * .2; g.lineCap = "round"; g.beginPath();
+  for (let i = 0; i < 12; i++) { const a = rot + i * Math.PI / 6, l = r * [1, .72, .9, .66, .95, .75][i % 6];
+    g.moveTo(cx + Math.cos(a) * r * .12, cy + Math.sin(a) * r * .12); g.lineTo(cx + Math.cos(a) * l, cy + Math.sin(a) * l); }
+  g.stroke();
+}
+// The laptop has no audio of its own here (speech plays on the phone), so the bars follow a soft synthetic envelope.
+function level(state, t) { return state === "speaking" ? .35 + .3 * Math.abs(Math.sin(t * 9) * Math.sin(t * 3.3)) : .18 + .12 * Math.sin(t * 5); }
+const reduceMotion = () => pref("reduce", false) || matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+let ctl = null;  // one penguin, drawn on whichever of these canvases is visible
+const views = ["talkCore", "bootCore", "idleCore"].map(id => { const c = $("#" + id); return {c, g: c.getContext("2d")}; });
+fetch("/friday_anims.json").then(r => r.json()).then(spec => {
+  ctl = new Friday.Controller(spec, {walkIn: pref("bootAnim", true) && !reduceMotion()});
+  if (!S.linked) ctl.setLink(false, S.state === "error");
+  else ctl.state(S.state);
+});
+let lastMs = 0, lastDraw = 0;
+function frame(ms) {
+  const t = ms / 1000, dt = lastMs ? Math.min(250, ms - lastMs) : 0, busy = ["listening", "thinking", "speaking"].includes(S.state);
+  lastMs = ms;
+  if (ctl) ctl.tick(dt);  // every frame, so timing holds even when drawing is throttled
+  if (ms - lastDraw >= (reduceMotion() ? 50 : busy ? 0 : 40)) {  // 60 fps only while active (docs/UI.md budget)
+    lastDraw = ms;
+    const lv = busy && S.state !== "thinking" ? level(S.state, t) : 0;
+    if (ctl) for (const v of views) if (v.c.offsetParent !== null) ctl.draw(v.g, v.c.width, v.c.height, {level: lv, time: t});
+  }
+  requestAnimationFrame(frame);
+}
+
+// ---------------- state + socket ----------------
+const S = {linked: false, state: "offline", stats: null, screen: "talk", lastNet: null};
+let ws, pending = 0;
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/`);
+  ws.onopen = () => { ws.send(JSON.stringify({type: "hello", token: TOKEN, client: "desk"})); S.linked = true; ctl?.setLink(true); setState("idle"); send({type: "stats"}); };
+  ws.onmessage = e => { if (typeof e.data === "string") onEvent(JSON.parse(e.data)); };
+  ws.onclose = e => { S.linked = false; ctl?.setLink(false, e.code === 4001); setState(e.code === 4001 ? "error" : "offline"); setTimeout(connect, 3000); };
+}
+const send = m => { if (ws && ws.readyState === 1) { ws.send(JSON.stringify(m)); return true; } return false; };
+function command(text, go = true) {
+  const ok = send({type: "text", text});
+  addMsg("you", "You", text);
+  if (!ok) addMsg("notice", "Friday", "Not linked to the Core, so that wasn't sent.");
+  if (go) show("talk");
+}
+
+function onEvent(m) {
+  const ph = m.src === "phone";
+  switch (m.type) {
+    case "state": setState(m.state); break;
+    case "heard": if (m.text) addMsg("you", ph ? "You · via phone" : "You · voice", `“${m.text}”`); break;
+    case "reply":
+      addMsg("friday", ph ? "Friday · on phone" : "Friday", m.text, m.detail);
+      if (m.media) m.media.tracks ? trackList(m.media.tracks) : mediaCard(m.media);
+      $("#meta").textContent = `${m.path} path · ${m.seconds} s`;
+      ctl?.reply({tool: m.tool, detail: m.detail, seconds: m.seconds, spoken: ph});
+      break;
+    case "now_playing": liveMedia(m.media); break;
+    case "volume": if (document.activeElement !== $("#mVol")) $("#mVol").value = m.level; lapLevel("lVol", m.level); break;  // don't fight a drag
+    case "brightness": lapLevel("lBright", m.level); break;
+    case "dirs": showDirs(m); break;
+    case "repo": showRepo(m); break;
+    case "activity": ctl?.activity(m.name, m.args || {}); break;
+    case "notify": ctl?.notify(); addMsg("notice", "Friday · notice", m.text); break;
+    case "confirm": confirmAction(m); break;
+    case "stats": onStats(m); ctl?.stats({cpu: m.cpu, battery: m.phone_stats?.battery, charging: m.phone_stats?.charging}); break;
+  }
+}
+
+function caption() {
+  return ({listening: ["Listening", "Speak to the phone — it's streaming to the Core."], thinking: ["Thinking", S.verb],
+    speaking: ["Speaking", "Replying through the phone speaker."], error: ["Link error", "The Core rejected this console's token. Reload the page."],
+    offline: ["Offline", "Can't reach the Core. Retrying…"]})[S.state] || ["Ready", "Type below, or say “Hey Friday” to the phone."];
+}
+const VERBS = ["Pondering…", "Noodling…", "Mulling it over…", "Waddling through it…", "Chilling on it…", "Defrosting…", "Brewing an answer…", "Flippering…"];
+function setState(s) {
+  if (s === "thinking" && S.state !== "thinking") S.verb = VERBS[Math.floor(Math.random() * VERBS.length)];  // Claude Code-style, one per think
+  S.state = !S.linked && s !== "error" ? "offline" : s;
+  if (S.linked) ctl?.state(S.state);  // offline / error come from the link (ws open / close)
+  const [l, h] = caption();
+  $$("[data-state]").forEach(e => { e.textContent = l.toUpperCase(); e.style.color = S.state === "error" ? "var(--amber)" : S.state === "offline" ? "var(--muted)" : "var(--cyan)"; });
+  $$("[data-hint]").forEach(e => e.textContent = h);
+  $("#linkDot").className = "dot " + (S.linked ? "on" : S.state === "error" ? "warn" : "");
+  $("#linkText").textContent = S.linked ? "Core" : S.state === "error" ? "Token" : "Offline";
+  $("#linkFoot").title = S.linked ? "Core linked" : S.state === "error" ? "Token rejected" : "Core offline";
+  $("#tLink").className = $("#linkDot").className;
+  if (["listening", "speaking"].includes(S.state) || S.state === "error") wake();
+}
+
+// ---------------- navigation ----------------
+const SCREENS = [["talk", "Chat", "M4 5h16v11H10l-6 4z"], ["music", "Music", "M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"],
+  ["processes", "Processes", "M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"], ["performance", "Performance", "M3 12h4l3-7 4 14 3-7h4"],
+  ["setup", "Setup", "M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4"]];
+$("#nav").innerHTML = SCREENS.map(([k, n, d], i) => `<button data-nav="${k}" title="${n} (${i + 1})"><svg viewBox="0 0 24 24"><path d="${d}"/></svg>${n}</button>`).join("");
+function show(k) {
+  if (!SCREENS.some(s => s[0] === k)) k = "talk";  // "home" from older saved prefs is now the empty chat
+  S.screen = k;
+  $$(".screen").forEach(e => e.classList.toggle("on", e.dataset.s === k));
+  $$("[data-nav]").forEach(e => e.classList.toggle("on", e.dataset.nav === k));
+  if (k === "music") { renderMusic(); send({type: "volume", step: 0}); }  // the slider starts at the laptop's level
+  if (k === "processes" || k === "performance") { send({type: "stats"}); renderStats(); }
+  if (k === "setup") renderSetup();
+  if (k === "talk") setTimeout(() => $("#cmd").focus(), 50);
+  setState(S.state);  // the hint depends on the screen
+  setPref("screen", k);
+}
+document.addEventListener("click", e => {
+  const n = e.target.closest("[data-nav]"); if (n) return show(n.dataset.nav);
+  const g = e.target.closest("[data-go]"); if (g) return show(g.dataset.go);
+  const c = e.target.closest("[data-cmd]"); if (c) return command(c.dataset.cmd, c.dataset.stay === undefined);
+});
+document.addEventListener("keydown", e => {
+  wake();
+  if ($("#modal").classList.contains("on")) { if (e.key === "Escape") { const no = closeModal.no; closeModal(); no?.(); } return; }
+  if (e.target.tagName === "INPUT") return;
+  if (e.key >= "1" && e.key <= String(SCREENS.length)) show(SCREENS[+e.key - 1][0]);
+  if (e.key === "/") { e.preventDefault(); show("talk"); }
+});
+function newChat() { $("#log").innerHTML = ""; $("#talk").classList.add("empty"); send({type: "new"}); show("talk"); }  // the Core forgets the follow-up context too
+// starters on the empty chat: a few fixed ones, your most-opened apps, then your last asks (these fill the box instead of sending)
+const STARTERS = [["Laptop status", "what's the laptop cpu"], ["Play music", "play some music on spotify"], ["Focus 25 min", "set a timer for 25 minutes for focus"]];
+function renderRecents() {
+  $("#starters").innerHTML = STARTERS.map(([n, c]) => `<button data-cmd="${esc(c)}">${esc(n)}</button>`).join("") +
+    (S.stats?.apps || []).map(a => `<button data-cmd="${esc(a.cmd)}">${esc(a.label)}</button>`).join("") +
+    pref("recent", []).filter(t => !STARTERS.some(s => s[1] === t.toLowerCase())).slice(0, 3).map(t => `<button data-fill="${esc(t)}" title="${esc(t)}">↺ ${esc(t.length > 28 ? t.slice(0, 27) + "…" : t)}</button>`).join("");
+}
+$("#starters").addEventListener("click", e => { const b = e.target.closest("[data-fill]"); if (b) { $("#cmd").value = b.dataset.fill; $("#cmd").focus(); } });
+$("#talkCore").onclick = () => ctl?.poke();
+{  // the penguin's eyes follow the pointer while it idles
+  const c = $("#talkCore"), r = () => c.getBoundingClientRect();
+  c.onmousemove = e => ctl?.hover(Math.max(-1, Math.min(1, (e.clientX - r().left - r().width / 2) / (r().width / 4))));
+  c.onmouseleave = () => ctl?.hover(null);
+}
+// + in the input bar: the few tool shortcuts worth a click (what the old Tools screen did)
+const QUICK = [["New chat", "new"], ["Open on laptop…", "ask", "App name", "open {} on the laptop"], ["Open on phone…", "ask", "App name", "open {} on my phone"],
+  ["Timer…", "ask", "Minutes", "set a timer for {} minutes"], ["Focus 25 min", "cmd", "set a timer for 25 minutes for focus"],
+  ["Mute phone", "cmd", "mute the phone"], ["PowerShell…", "ask", "Command", "use powershell to run: {}"]];
+function quickMenu(title, items) {
+  const d = $("#dialog"); d.className = "dialog";
+  d.innerHTML = `<div class="label cyan" style="font-size:12px">${esc(title)}</div><div class="qlist">` + items.map(([n, kind, a, b]) => kind === "new" || kind === "repos" ? `<button class="row" id="q${kind}"><span class="t">${esc(n)}</span></button>` : kind === "ask"
+    ? `<button class="row" data-ask="${esc(a)}" data-tpl="${esc(b)}"><span class="t">${esc(n)}</span></button>`
+    : `<button class="row" data-cmd="${esc(a)}"><span class="t"><div>${esc(n)}</div>${b ? `<div class="label">${esc(b)}</div>` : ""}</span></button>`).join("") + `</div><div class="btns"><button id="dlgNo">Cancel</button></div>`;
+  $("#modal").classList.add("on"); closeModal.no = null;
+  $("#dlgNo").onclick = closeModal;
+  if ($("#qnew")) $("#qnew").onclick = () => { closeModal(); newChat(); };
+  if ($("#qrepos")) $("#qrepos").onclick = () => quickMenu(S.stats?.repos?.length ? "GitHub status: pick a folder" : "No git folders: is the Core linked and restarted?",
+    (S.stats?.repos || []).map(r => [r.name, "cmd", `what's the github status of ${r.path}`, r.path]));
+  d.onkeydown = null;
+  d.onclick = e => { if (e.target.closest("[data-cmd]")) closeModal(); };  // runs before the document handler sends it
+}
+$("#plusBtn").onclick = () => quickMenu("Quick actions", QUICK);
+// the button right of the input: brightness and volume sliders, then git folders (tap one for its GitHub status) and a folder browser
+function laptopPanel() {
+  const d = $("#dialog"); d.className = "dialog"; S.browsing = false;
+  const slider = (id, name) => `<label class="lrow"><span class="label">${name}</span><input type="range" id="${id}" min="0" max="100" aria-label="Laptop ${name.toLowerCase()}"><span class="label" id="${id}V">…</span></label>`;
+  d.innerHTML = `<div class="label cyan" style="font-size:12px">Laptop</div>` + slider("lBright", "Brightness") + slider("lVol", "Volume") +
+    `<div class="label" style="margin-top:18px">GitHub status</div><div class="qlist"><button class="row" id="lBrowse"><span class="t" style="color:var(--cyan)">Browse folders…</span></button>` +
+    (S.stats?.repos || []).map(r => `<button class="row" data-repo="${esc(r.path)}"><span class="t"><div>${esc(r.name)}</div><div class="label">${esc(r.path)}</div></span></button>`).join("") +
+    `</div><div class="btns"><button id="dlgNo">Close</button></div>`;
+  $("#modal").classList.add("on"); closeModal.no = null;
+  $("#dlgNo").onclick = closeModal; d.onkeydown = null;
+  $("#lBright").oninput = e => { $("#lBrightV").textContent = e.target.value + "%"; send({type: "brightness", level: +e.target.value}); };  // the Core applies only the newest
+  $("#lVol").oninput = e => { $("#lVolV").textContent = e.target.value + "%"; send({type: "volume", level: +e.target.value}); };
+  $("#lBrowse").onclick = () => browse("");
+  d.onclick = e => { const r = e.target.closest("[data-repo]"); if (r) openRepo(r.dataset.repo); };
+  S.repo = null;
+  send({type: "brightness"}); send({type: "volume", step: 0});  // the current levels
+}
+// git view for one folder: status, commit, pull/push/fetch, switch branch, commit graph
+function openRepo(path, extra = {}) {
+  path = path.replace(/\\+$/, ""); if (/^[a-z]:$/i.test(path)) path += "\\";  // same form the Core sends back (a drive root keeps its \)
+  S.repo = path; S.browsing = false; send({type: "repo", path, ...extra}); if (extra.action) repoBusy(extra.action); }
+function repoBusy(what) { const n = $("#gNote"); if (n) { n.className = "label"; n.textContent = `${what}…`; } }
+function showRepo(m) {
+  if (S.repo !== m.path) return;  // closed, or another folder opened since
+  const d = $("#dialog"); d.className = "dialog"; $("#modal").classList.add("on"); closeModal.no = null;
+  d.classList.add("wide");
+  const fail = /failed|didn't|can't|cancelled/i.test(m.note || "") || m.error, ic = p => `<svg viewBox="0 0 24 24"><path d="${p}"/></svg>`;
+  const kind = s => ({"??": "new", " M": "edited", "M ": "edited", "MM": "edited", " D": "deleted", "D ": "deleted", "A ": "added", "R ": "renamed"})[s.slice(0, 2)] || s.slice(0, 2).trim();
+  d.innerHTML = `<div class="ghead"><div><div class="gname">${esc(m.name || m.path)}</div><div class="gpath">${esc(m.path)}</div></div></div>` +
+    (m.error ? "" : `<div class="chips"><span class="chip br">${ic("M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9")}${esc(m.branch)}</span>` +
+      (m.ahead ? `<span class="chip">↑ ${m.ahead} to push</span>` : "") + (m.behind ? `<span class="chip">↓ ${m.behind} to pull</span>` : "") +
+      (!m.upstream ? `<span class="chip dim">not on GitHub yet</span>` : m.gone ? `<span class="chip warn">remote branch gone</span>` : !m.ahead && !m.behind ? `<span class="chip dim">in sync</span>` : "") +
+      `<span class="chip ${m.changed ? "warn" : "dim"}">${m.changed ? `${m.changed} changed` : "clean"}</span></div>`) +
+    `<div class="gnote ${fail ? "bad" : ""}" id="gNote">${esc(m.error || m.note || "")}</div>` +
+    (m.error ? "" : `<div class="gbar">
+      <button data-g="pull">${ic("M12 4v12m0 0-5-5m5 5 5-5M5 20h14")}Pull</button><button data-g="push">${ic("M12 20V8m0 0-5 5m5-5 5 5M5 4h14")}Push</button>
+      <button data-g="fetch">${ic("M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5")}Fetch</button><button id="gHub">${ic("M9 19c-4 1.5-4-2-6-2.5m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1-.3-3.4 1.3a11.6 11.6 0 0 0-6 0C6.8 2.1 5.8 2.4 5.8 2.4a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4.4 8.8c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21")}PRs &amp; CI</button></div>` +
+      (m.changed ? `<div class="gcard"><div class="gsub">Changes</div><div class="gfiles">${m.changes.map(c => `<div><span class="fk ${kind(c)}">${esc(kind(c))}</span>${esc(c.slice(3))}</div>`).join("")}</div>
+        <textarea id="gMsg" rows="2" placeholder="Commit message"></textarea><button class="gprimary" id="gCommit">Commit ${m.changed} change${m.changed === 1 ? "" : "s"}</button></div>` : "") +
+      `<div class="gcard"><div class="gsub">Branch</div><div class="gform"><select id="gBranch" aria-label="Branch">${m.branches.map(b => `<option ${b === m.branch ? "selected" : ""}>${esc(b)}</option>`).join("")}</select><button id="gSwitch">Switch</button></div></div>
+      <div class="gsub" style="margin-top:18px">History</div><div class="ggraph">${graphRows(m.graph)}</div>`) +
+    `<div class="btns"><button id="dlgBack">Back</button><button id="dlgNo">Close</button></div>`;
+  $("#dlgNo").onclick = () => { S.repo = null; closeModal(); }; $("#dlgBack").onclick = laptopPanel; d.onkeydown = null;
+  d.onclick = e => { const g = e.target.closest("[data-g]"); if (g) openRepo(m.path, {action: g.dataset.g}); };
+  if (m.error) return;
+  $("#gHub").onclick = () => { S.repo = null; closeModal(); command(`what's the github status of ${m.path}`, false); };
+  if (m.changed) {
+    $("#gCommit").onclick = () => { const msg = $("#gMsg").value.trim(); if (msg) openRepo(m.path, {action: "commit", message: msg}); else $("#gMsg").focus(); };
+    $("#gMsg").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#gCommit").click(); } };
+  }
+  $("#gSwitch").onclick = () => { const b = $("#gBranch").value; if (b !== m.branch) openRepo(m.path, {action: "switch", branch: b}); };
+}
+// commit graph: one SVG strip per row, drawn from the Core's lane layout (lines meet across rows)
+const LANE = ["#d97757", "#6a9bcc", "#788c5d", "#c2a35a", "#a98bd4", "#cc7fa0", "#5fa8a0"];
+function graphRows(rows) {
+  const W = 14, H = 30, x = i => 9 + i * W, mid = H / 2, col = i => LANE[i % LANE.length];
+  const width = x(Math.max(0, ...rows.flatMap(r => [r.lane, ...r.up, ...r.down, ...r.pass_]))) + 9;
+  return rows.map(r => {
+    const seg = (x1, y1, x2, y2, c) => x1 === x2 ? `<path d="M${x1} ${y1}V${y2}" stroke="${c}"/>` : `<path d="M${x1} ${y1}C${x1} ${(y1 + y2) / 2} ${x2} ${(y1 + y2) / 2} ${x2} ${y2}" stroke="${c}"/>`;
+    const svg = r.pass_.map(i => seg(x(i), 0, x(i), H, col(i))).join("") + r.up.map(i => seg(x(i), 0, x(r.lane), mid, col(i))).join("") +
+      r.down.map(j => seg(x(r.lane), mid, x(j), H, col(j))).join("") +
+      `<circle cx="${x(r.lane)}" cy="${mid}" r="${r.head ? 5 : 4}" fill="${r.head ? "var(--surface)" : col(r.lane)}" stroke="${col(r.lane)}" stroke-width="${r.head ? 2.5 : 0}"/>`;
+    const refs = r.refs.filter(f => !(f.startsWith("origin/") && r.refs.includes(f.slice(7)))).map(f => `<span class="ref ${f.startsWith("origin/") ? "remote" : ""}" style="--c:${col(r.lane)}">${esc(f.replace(/^tag: /, "🏷 "))}</span>`).join("");
+    return `<div class="grow"><svg width="${width}" height="${H}" fill="none" stroke-width="2">${svg}</svg>` +
+      `<div class="gmsg"><div class="gsubj">${refs}<span title="${esc(r.subject)}">${esc(r.subject)}</span></div><div class="gmeta">${esc(r.sha)} · ${esc(r.when)}</div></div></div>`;
+  }).join("");
+}
+function lapLevel(id, v) { const el = $("#" + id); if (el && document.activeElement !== el) { el.value = v; $("#" + id + "V").textContent = v + "%"; } }
+function browse(path) { S.browsing = true; send({type: "dirs", path}); }
+function showDirs(m) {  // one list per folder; ● marks git folders
+  if (!S.browsing || !$("#modal").classList.contains("on")) return;
+  const d = $("#dialog"), path = m.path.replace(/\\$/, ""), i = path.lastIndexOf("\\"), up = i > 0 ? path.slice(0, i) + "\\" : null;
+  d.innerHTML = `<div class="label cyan" style="font-size:12px">${esc(path)}\\</div><div class="qlist">` +
+    `<button class="row" data-repo="${esc(path + "\\")}"><span class="t" style="color:var(--cyan)">✓ Open git view here</span></button>` +
+    (up ? `<button class="row" data-dir="${esc(up)}"><span class="t">↑ Up</span></button>` : "") +
+    (m.error ? `<div class="label amber">${esc(m.error)}</div>` : "") +
+    m.dirs.map(f => `<button class="row" data-dir="${esc(path + "\\" + f.name)}"><span class="t">${f.git ? "● " : ""}${esc(f.name)}</span></button>`).join("") +
+    `</div><div class="btns"><button id="dlgBack">Back</button><button id="dlgNo">Close</button></div>`;
+  $("#dlgNo").onclick = closeModal; $("#dlgBack").onclick = laptopPanel;
+  d.onclick = e => { const b = e.target.closest("[data-dir]"), r = e.target.closest("[data-repo]"); if (b) browse(b.dataset.dir); else if (r) openRepo(r.dataset.repo); };
+}
+$("#lapBtn").onclick = laptopPanel;
+$("#form").onsubmit = e => { e.preventDefault(); const t = $("#cmd").value.trim(); if (t) { command(t, false); $("#cmd").value = ""; } };
+
+// ---------------- talk log ----------------
+function addMsg(kind, who, text, detail = "") {
+  const d = document.createElement("div"); d.className = "msg " + kind;
+  d.innerHTML = (who === "You" || who === "Friday" ? "" : `<div class="who label ${kind === "friday" ? "cyan" : kind === "notice" ? "amber" : "dim"}">${esc(who)}</div>`) + `<div class="body">${esc(text)}</div>` +
+    (detail ? `<div class="det">${esc(detail)}</div>` : "");
+  if (kind === "you") { const t = text.replace(/^“|”$/g, ""); setPref("recent", [t, ...pref("recent", []).filter(x => x !== t)].slice(0, 12)); renderRecents(); }
+  $("#talk").classList.remove("empty");
+  const log = $("#log"); log.append(d); while (log.children.length > 80) log.firstChild.remove();
+  log.scrollTop = log.scrollHeight;
+}
+function fillMedia(c, md, playing = true) {
+  c.innerHTML = (md.art && md.art.startsWith("data:image/") ? `<img alt="" src="${esc(md.art)}">` : `<div class="noart"></div>`) +
+    `<div class="t"><div class="label cyan">${playing ? "Now playing" : "Paused"} · ${esc(md.app || "")}</div><div class="tt">${esc(md.title)}</div><div class="ar">${esc(md.artist)}${md.album ? " · " + esc(md.album) : ""}</div></div>`;
+}
+function mediaCard(md) {  // now-playing preview under the reply that started it; now_playing keeps it live
+  const c = document.createElement("div"); c.className = "media"; fillMedia(c, md);
+  const log = $("#log"); log.lastElementChild.append(c); log.scrollTop = log.scrollHeight;
+  S.mediaCard = c;
+}
+function trackList(tracks) {  // Spotify search results under the reply; ▶ plays that exact track on the laptop
+  const c = document.createElement("div"); c.className = "tracks";
+  c.innerHTML = tracks.map(t => `<div class="media">` + (t.art?.startsWith("data:image/") ? `<img alt="" src="${esc(t.art)}">` : `<div class="noart"></div>`) +
+    `<div class="t"><div class="tt">${esc(t.title)}</div><div class="ar">${esc(t.artist)}${t.album ? " · " + esc(t.album) : ""}</div></div>` +
+    `<button class="play" data-uri="${esc(t.uri)}" title="Play ${esc(t.title)}" aria-label="Play ${esc(t.title)}"><svg viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z"/></svg></button></div>`).join("");
+  c.onclick = e => { const b = e.target.closest("[data-uri]"); if (b && !send({type: "play_track", uri: b.dataset.uri})) addMsg("notice", "Friday", "Not linked to the Core."); };
+  const log = $("#log"); log.lastElementChild.append(c); log.scrollTop = log.scrollHeight;
+}
+function liveMedia(md) {  // only the latest card follows the laptop; when playback stops it keeps the last track, paused
+  if (md) S.lastMedia = md; else if (S.lastMedia) S.lastMedia = {...S.lastMedia, playing: false};
+  if (S.mediaCard?.isConnected && S.lastMedia) fillMedia(S.mediaCard, S.lastMedia, !!md?.playing);
+  S.mediaAt = Date.now();
+  renderMusic();
+}
+
+// pointerdown, not click: the same press wakes the screen, which hides the card before a click could land
+$("#idleSong").addEventListener("pointerdown", () => show("music"));
+// ---------------- music ----------------
+const clock = s => `${s / 60 | 0}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+function renderMusic() {
+  const m = S.lastMedia, playing = !!m?.playing;
+  $("#idleSong").classList.toggle("on", playing);  // the sleep screen shows the track; a click opens Music
+  if (playing) {
+    $("#idleTitle").textContent = m.title; $("#idleArtist").textContent = m.artist || "";
+    const ia = m.art?.startsWith("data:image/") ? m.art : "";
+    if ($("#idleArt").getAttribute("src") !== ia) ia ? $("#idleArt").setAttribute("src", ia) : $("#idleArt").removeAttribute("src");
+  }
+  if (S.screen !== "music") return;
+  $("#mSrc").textContent = m ? `${playing ? "Now playing" : "Paused"} · ${m.app || "laptop"}` : "Laptop";
+  $("#mTitle").textContent = m ? m.title : "Nothing playing";
+  $("#mArtist").textContent = m ? [m.artist, m.album].filter(Boolean).join(" · ") : "Say “play a song on Spotify”, or search with the magnifier.";
+  const art = m?.art?.startsWith("data:image/") ? m.art : "";
+  if ($("#mArt").getAttribute("src") !== art) art ? $("#mArt").setAttribute("src", art) : $("#mArt").removeAttribute("src");
+  if (S.bgArt !== art) { S.bgArt = art; $("#mBg").style.backgroundImage = art ? `url("${art}")` : ""; }  // the cover, blurred, tints the card
+  $("#mPlay").innerHTML = playing ? `<path d="M6 4h4v16H6zm8 0h4v16h-4z"/>` : `<path d="M7 4l13 8-13 8z"/>`;
+  $("#mShuf").style.visibility = m && m.shuffle != null ? "visible" : "hidden"; $("#mShuf").classList.toggle("on", !!m?.shuffle);
+  const len = m?.length || 0;  // the Core pushes position only on changes; run the clock here between pushes
+  const pos = len ? Math.min(len, (m.position || 0) + (playing ? (Date.now() - S.mediaAt) / 1000 : 0)) : 0;
+  $("#mBar").style.width = len ? `${pos / len * 100}%` : "0";
+  $("#mPos").textContent = len ? clock(pos) : ""; $("#mLeft").textContent = len ? "-" + clock(len - pos) : "";
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-media]"); if (!b) return;
+  let a = b.dataset.media;
+  if (a === "toggle") { a = S.lastMedia?.playing ? "pause" : "play"; if (S.lastMedia) { S.lastMedia.playing = a === "play"; renderMusic(); } }  // instant; the Core corrects it
+  if (!send({type: "media", action: a})) addMsg("notice", "Friday", "Not linked to the Core.");
+});
+$("#mVol").addEventListener("input", e => send({type: "volume", level: +e.target.value}));
+
+// ---------------- processes + performance (laptop only) ----------------
+const dur = s => s >= 3600 ? `${s / 3600 | 0}h ${(s % 3600) / 60 | 0}m` : `${s / 60 | 0}m ${s % 60}s`;
+const stat = (name, value, frac = null) => `<div class="stat"><div class="h"><span class="muted">${name}</span><span class="v ${frac > .85 ? "warn" : ""}">${esc(value)}</span></div>` +
+  (frac !== null ? `<div class="meter"><i class="${frac > .85 ? "warn" : ""}" style="width:${Math.min(100, Math.max(0, frac * 100))}%"></i></div>` : "") + `</div>`;
+function onStats(s) {
+  const appsChanged = JSON.stringify(s.apps) !== JSON.stringify(S.stats?.apps);
+  S.stats = s;
+  if (appsChanged) renderRecents();
+  $("#phoneDot").className = "dot " + (s.phone ? "on" : ""); $("#phoneFoot").title = s.phone ? "Phone linked" : "Phone offline";
+  renderStats();
+  $("#tPhone").className = $("#phoneDot").className; $("#tPhoneT").textContent = s.phone ? "Phone mic" : "Phone offline";
+  if (S.screen === "setup") renderSetup();
+}
+
+const gb = b => (b / 2 ** 30).toFixed(1);
+function renderStats() {
+  const s = S.linked ? S.stats : null;
+  const most = Math.max(1, ...(s?.top || []).map(p => p.ram));  // bars: memory share against the hungriest program
+  if (S.screen === "processes") $("#procs").innerHTML = !s ? `<div class="empty">Not linked to the Core.</div>` : !s.top?.length ? `<div class="empty">Measuring…</div>` :
+    s.top.map(p => { const n = p.name.replace(/\.exe$/i, "");
+      return `<button class="row" data-cmd="kill ${esc(n)}" data-stay><span class="t"><div>${esc(n)}</div><div class="label">CPU ${Math.round(p.cpu)}% · RAM ${Math.round(p.ram / 2 ** 20)} MB</div></span><span class="tag amber">Close</span></button>` +
+        `<div class="procbar"><i style="width:${p.ram / most * 100}%"></i></div>`; }).join("");
+  if (!s) { if (S.screen === "performance") $("#perf").innerHTML = `<div class="empty">Not linked to the Core.</div>`; return; }
+  // a tile: label, one big number, a detail line, a meter slot (amber above 85 % only where high is bad)
+  const tile = (name, big, sub, frac = null, warn = true) => `<div class="tile"><div class="label">${name}</div><div class="big ${warn && frac > .85 ? "warn" : ""}">${esc(big)}</div><div class="sub">${esc(sub)}</div>` +
+    `<div class="meter" style="${frac === null ? "visibility:hidden" : ""}"><i style="width:${Math.min(100, Math.max(0, (frac || 0) * 100))}%"></i></div></div>`;
+  const now = Date.now();
+  if (S.lastNet && now - S.lastNet[0] > 500) S.rate = [(s.net_recv - S.lastNet[1]) / 1024 / ((now - S.lastNet[0]) / 1000), (s.net_sent - S.lastNet[2]) / 1024 / ((now - S.lastNet[0]) / 1000)];
+  S.lastNet = [now, s.net_recv, s.net_sent];
+  if (S.screen === "performance") $("#perf").innerHTML =
+    tile("Processor", `${Math.round(s.cpu)}%`, `${s.cores} cores`, s.cpu / 100) +
+    tile("Memory", `${Math.round(s.ram)}%`, `${gb(s.ram_used)} of ${gb(s.ram_total)} GB`, s.ram / 100) +
+    (s.disk == null ? tile("Storage", "—", "Restart the Core to see this") : tile("Storage", `${Math.round(s.disk)}%`, `${gb(s.disk_used)} of ${gb(s.disk_total)} GB`, s.disk / 100)) +
+    (s.battery == null ? tile("Battery", "—", "No battery") : tile("Battery", `${s.battery}%`, s.plugged ? "Plugged in" : "On battery", s.battery / 100, false)) +
+    tile("Network", S.rate ? `↓ ${S.rate[0].toFixed(0)}` : "…", S.rate ? `KB/s down · ↑ ${S.rate[1].toFixed(0)} KB/s up` : "Measuring") +
+    tile("Core uptime", dur(s.uptime).replace(/ \d+s$/, ""), "Since the Core started");
+}
+
+// ---------------- setup ----------------
+function renderSetup() {
+  const s = S.stats || {}, val = (title, hint, v, warn) => `<div class="row"><span class="t"><div>${title}</div><div class="label">${esc(hint)}</div></span><span class="tag ${warn ? "amber" : ""}">${esc(v)}</span></div>`;
+  const tog = (title, hint, k, d) => `<button class="row" data-pref="${k}" data-def="${d}"><span class="t"><div>${title}</div><div class="label">${hint}</div></span><span class="tag ${pref(k, d) ? "" : "dim"}">${pref(k, d) ? "On" : "Off"}</span></button>`;
+  const idle = pref("idle", 180);
+  $("#setup").innerHTML = [
+    `<div><div class="label section">Status</div>` + val("Voice", "Piper text-to-speech", s.voice ? s.voice_name : "Off", S.stats && !s.voice) +
+      val("Phone", "Paired with scripts\\provision-phone.ps1", s.phone ? "Linked" : "Not linked", !s.phone) + `</div>`,
+    `<div><div class="label section">Appearance</div>` + tog("Boot animation", "When the console opens", "bootAnim", true) +
+      `<button class="row" id="idleBtn"><span class="t"><div>Ambient clock</div><div class="label">After no input for</div></span><span class="tag">${idle ? (idle < 60 ? idle + " s" : idle / 60 + " min") : "Never"}</span></button>` +
+      tog("Reduce motion", "Calmer core, no boot animation", "reduce", false) + `</div>`,
+  ].join("");
+}
+document.addEventListener("click", e => {
+  const p = e.target.closest("[data-pref]"); if (p) { setPref(p.dataset.pref, !pref(p.dataset.pref, p.dataset.def === "true")); renderSetup(); }
+  if (e.target.closest("#idleBtn")) { const st = [60, 180, 300, 600, 0]; setPref("idle", st[(st.indexOf(pref("idle", 180)) + 1) % st.length]); renderSetup(); wake(); }
+});
+
+// ---------------- dialogs ----------------
+function dialog({title, text = "", input = null, yes = "Go", amber = false, onYes, onNo}) {
+  const d = $("#dialog"); d.className = "dialog" + (amber ? " amber" : "");
+  d.innerHTML = `<div class="label ${amber ? "amber" : "cyan"}" style="font-size:12px">${esc(title)}</div>` + (text ? `<p>${esc(text)}</p>` : "") +
+    (input !== null ? `<input id="dlgIn" placeholder="${esc(input)}">` : "") + `<div class="btns"><button id="dlgNo">Cancel</button><button class="go" id="dlgYes">${esc(yes)}</button></div>`;
+  $("#modal").classList.add("on");
+  const done = ok => { closeModal(); ok ? onYes?.($("#dlgIn")?.value.trim()) : onNo?.(); };
+  $("#dlgYes").onclick = () => done(true); $("#dlgNo").onclick = () => done(false);
+  d.onkeydown = e => { if (e.key === "Enter") done(true); };
+  ($("#dlgIn") || $("#dlgYes")).focus();
+  closeModal.no = onNo;
+}
+function closeModal() { $("#modal").classList.remove("on"); }
+function prompt_(label, cb) { dialog({title: label, input: label, onYes: v => v && cb(v)}); }
+function confirmAction(m) {
+  wake();
+  ctl?.confirm();
+  dialog({title: m.tier >= 3 ? "Confirm · irreversible" : "Confirm action", text: m.summary, yes: "Do it", amber: true,
+    onYes: () => { ctl?.decided(true); send({type: "confirm", id: m.id, ok: true}); },
+    onNo: () => { ctl?.decided(false); send({type: "confirm", id: m.id, ok: false}); }});
+}
+
+// ---------------- clock, boot, idle ----------------
+function tick() {
+  const d = new Date(), hm = d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", hour12: false}), hr = d.getHours();
+  $$("[data-clock]").forEach(e => e.textContent = hm);
+  $("#greet").textContent = hr < 5 ? "Still up?" : hr < 12 ? "Good morning" : hr < 18 ? "Good afternoon" : "Good evening";
+  $$("[data-date]").forEach(e => e.textContent = d.toLocaleDateString([], {weekday: "long", day: "numeric", month: "long"}));
+  if (S.screen === "music" && S.lastMedia?.playing) renderMusic();
+  $("#idleInfo").textContent = `${S.linked ? "Core linked" : "Core offline"} · ${S.stats?.phone ? "Phone linked" : "Phone offline"}`;
+  if (S.linked) send({type: "stats"});
+}
+let idleTimer;
+function wake() {
+  if ($("#idle").classList.contains("on")) { $("#idle").classList.remove("on"); ctl?.sleep(false); }
+  clearTimeout(idleTimer);
+  const s = pref("idle", 180); if (s) idleTimer = setTimeout(sleep, s * 1000);
+}
+function sleep() {
+  if (["listening", "thinking", "speaking"].includes(S.state) || $("#modal").classList.contains("on")) return wake();
+  $("#idle").classList.add("on"); ctl?.sleep(true);
+}
+["mousemove", "mousedown", "wheel", "touchstart"].forEach(ev => document.addEventListener(ev, wake, {passive: true}));
+function boot() {
+  if (!pref("bootAnim", true) || reduceMotion()) return;
+  const b = $("#boot"); b.classList.add("on");  // the penguin walks in (Controller walkIn)
+  $("#bootLog").innerHTML = [["Core", "online"], ["Console", "loopback"], ["Link", "connecting"]].map(([k, v]) => `<div>${k.padEnd(9, " ")}··········&nbsp;&nbsp;${v}</div>`).join("");
+  setTimeout(() => $("#boot .word").classList.add("in"), 700);
+  $$("#bootLog div").forEach((e, i) => setTimeout(() => e.classList.add("in"), 1300 + i * 250));
+  const end = () => { b.style.transition = "opacity .35s"; b.style.opacity = 0; setTimeout(() => { b.classList.remove("on"); b.style.opacity = ""; }, 350); };
+  b.onclick = end; setTimeout(end, 2600);
+}
+
+renderRecents();
+show(pref("screen", "talk"));
+boot(); tick(); setInterval(tick, 2000); wake();
+setState("offline"); connect();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

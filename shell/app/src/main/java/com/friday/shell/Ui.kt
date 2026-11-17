@@ -1,0 +1,226 @@
+package com.friday.shell
+
+import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.view.Gravity
+import android.view.MotionEvent
+import android.view.View
+import android.widget.LinearLayout
+import android.widget.TextView
+
+/** FRIDAY design tokens (docs/UI.md) and the few view helpers every screen shares. */
+object Ui {
+    // Claude's own dark palette: warm charcoal, ivory text, clay accent
+    val BG = Color.rgb(38, 38, 36)               // #262624
+    val RAIL = Color.rgb(31, 30, 29)             // #1F1E1D sidebar
+    val SURFACE = Color.rgb(48, 48, 46)          // #30302E raised: inputs, dialogs, pressed
+    val LINE = Color.rgb(61, 61, 58)             // #3D3D3A
+    val ACCENT = Color.rgb(217, 119, 87)        // Claude clay #D97757
+    val ACCENT_DIM = Color.argb(140, 217, 119, 87)
+    val AMBER = Color.rgb(232, 185, 49)          // warnings stay distinct from the clay accent
+    val TEXT = Color.rgb(250, 249, 245)          // #FAF9F5 ivory
+    val MUTED = Color.rgb(156, 154, 146)         // #9C9A92
+    val DIM = Color.rgb(115, 114, 108)           // #73726C
+    val SLEEP = BG                               // idle screen keeps the Claude charcoal so the near-black penguin still reads
+    val THIN: Typeface = Typeface.create("sans-serif-thin", Typeface.NORMAL)
+    val LIGHT: Typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+    val MEDIUM: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+    val SERIF: Typeface = Typeface.SERIF
+}
+
+fun Context.dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+fun Context.dpf(v: Float) = v * resources.displayMetrics.density
+
+/** Body text: light sans. */
+fun Context.text(size: Float, color: Int = Ui.TEXT, face: Typeface = Ui.LIGHT) = TextView(this).apply {
+    textSize = size; setTextColor(color); typeface = face; includeFontPadding = false
+}
+
+/** Uppercase mono label with wide tracking: section names, status, nav. */
+fun Context.label(s: String, color: Int = Ui.MUTED, size: Float = 10.5f) = TextView(this).apply {
+    text = s.uppercase(); textSize = size; setTextColor(color); typeface = Typeface.MONOSPACE
+    letterSpacing = 0.15f; includeFontPadding = false
+}
+
+fun Context.vbox(pad: Int = 0) = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(pad, pad, pad, pad) }
+fun Context.hbox() = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+
+fun lp(w: Int = -1, h: Int = -2, weight: Float = 0f) = LinearLayout.LayoutParams(w, h, weight)
+fun LinearLayout.LayoutParams.margins(l: Int = 0, t: Int = 0, r: Int = 0, b: Int = 0) = apply { setMargins(l, t, r, b) }
+
+/** Pressed feedback without ripples or cards: shrink a touch, tint the background. */
+fun View.pressable(onClick: () -> Unit): View {
+    isClickable = true
+    setOnTouchListener { v, e ->
+        when (e.action) {
+            MotionEvent.ACTION_DOWN -> v.animate().scaleX(0.96f).scaleY(0.96f).setDuration(80).start()
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> v.animate().scaleX(1f).scaleY(1f).setDuration(120).start()
+        }
+        false
+    }
+    setOnClickListener { onClick() }
+    return this
+}
+
+fun pill(color: Int, stroke: Int = 0, strokeColor: Int = 0, radius: Float = 999f) = GradientDrawable().apply {
+    setColor(color); cornerRadius = radius
+    if (stroke > 0) setStroke(stroke, strokeColor)
+}
+
+/** A small status dot. */
+class Dot(ctx: Context, var color: Int = Ui.DIM) : View(ctx) {
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    fun set(c: Int) { if (c != color) { color = c; invalidate() } }
+    override fun onDraw(c: Canvas) {
+        p.color = color; c.drawCircle(width / 2f, height / 2f, minOf(width, height) / 2f, p)
+    }
+}
+
+/** Thin meter: 3 dp track, accent fill that turns amber above 85 %. */
+class Meter(ctx: Context, private val warn: Boolean = true) : View(ctx) {
+    var value = -1f  // 0..1, negative = unknown
+        set(v) { field = v; invalidate() }
+    private val track = Paint().apply { color = Ui.LINE }
+    private val fill = Paint()
+    override fun onDraw(c: Canvas) {
+        c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), track)
+        if (value < 0) return
+        fill.color = if (warn && value > 0.85f) Ui.AMBER else Ui.ACCENT
+        c.drawRect(0f, 0f, width * value.coerceIn(0f, 1f), height.toFloat(), fill)
+    }
+}
+
+/** One row of the git view's commit graph, from the Core's lane layout (lane, up, down, pass_); rows stack seamlessly. */
+class GraphCell(ctx: Context, private val row: org.json.JSONObject) : View(ctx) {
+    companion object { val LANES = intArrayOf(0xFFD97757.toInt(), 0xFF6A9BCC.toInt(), 0xFF788C5D.toInt(), 0xFFC2A35A.toInt(), 0xFFA98BD4.toInt(), 0xFFCC7FA0.toInt(), 0xFF5FA8A0.toInt()) }
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+    private val path = android.graphics.Path()
+    private fun ints(k: String) = row.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.optInt(it) } } ?: emptyList()
+    override fun onDraw(c: Canvas) {
+        val d = resources.displayMetrics.density; val w = 14 * d; val h = height.toFloat(); val mid = h / 2
+        fun x(i: Int) = 9 * d + i * w
+        fun col(i: Int) = LANES[i % LANES.size]
+        fun seg(x1: Float, y1: Float, x2: Float, y2: Float, color: Int) {
+            p.color = color; p.strokeWidth = 2 * d; path.reset(); path.moveTo(x1, y1)
+            if (x1 == x2) path.lineTo(x2, y2) else path.cubicTo(x1, (y1 + y2) / 2, x2, (y1 + y2) / 2, x2, y2)
+            c.drawPath(path, p)
+        }
+        val lane = row.optInt("lane")
+        ints("pass_").forEach { seg(x(it), 0f, x(it), h, col(it)) }
+        ints("up").forEach { seg(x(it), 0f, x(lane), mid, col(it)) }
+        ints("down").forEach { seg(x(lane), mid, x(it), h, col(it)) }
+        val head = row.optBoolean("head")
+        p.color = col(lane)
+        if (head) { p.style = Paint.Style.FILL; p.color = Ui.SURFACE; c.drawCircle(x(lane), mid, 5 * d, p); p.style = Paint.Style.STROKE; p.color = col(lane); p.strokeWidth = 2.5f * d; c.drawCircle(x(lane), mid, 5 * d, p) }
+        else { p.style = Paint.Style.FILL; c.drawCircle(x(lane), mid, 4 * d, p) }
+        p.style = Paint.Style.STROKE
+    }
+}
+
+/** Countdown ring: a faint full track and an arc for the share of time left (0..1), from 12 o'clock. */
+class Ring(ctx: Context) : View(ctx) {
+    var value = 1f
+        set(v) { field = v; invalidate() }
+    var color = Ui.ACCENT
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+    private val o = android.graphics.RectF()
+    override fun onDraw(c: Canvas) {
+        val s = minOf(width, height).toFloat(); p.strokeWidth = s * 0.12f
+        val in_ = p.strokeWidth / 2; o.set((width - s) / 2 + in_, (height - s) / 2 + in_, (width + s) / 2 - in_, (height + s) / 2 - in_)
+        p.color = Ui.LINE; c.drawOval(o, p)
+        p.color = color; c.drawArc(o, -90f, 360f * value.coerceIn(0f, 1f), false, p)
+    }
+}
+
+/** Line icons drawn on Canvas (no image assets): mic, grid, pulse, timer, send, chat, list, sliders; media: play, pause, prev, next, shuffle, note. */
+class Icon(ctx: Context, kind: String, var color: Int = Ui.ACCENT) : View(ctx) {
+    var kind = kind
+        set(v) { if (v != field) { field = v; invalidate() } }
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
+    private val o = android.graphics.RectF()
+    private val path = android.graphics.Path()
+    override fun onDraw(c: Canvas) {
+        val s = minOf(width, height).toFloat(); val x = (width - s) / 2; val y = (height - s) / 2
+        fun X(f: Float) = x + f * s
+        fun Y(f: Float) = y + f * s
+        fun tri(vararg f: Float) {  // filled, rounded triangle from three x,y fractions
+            path.reset(); path.moveTo(X(f[0]), Y(f[1])); path.lineTo(X(f[2]), Y(f[3])); path.lineTo(X(f[4]), Y(f[5])); path.close()
+            p.style = Paint.Style.FILL_AND_STROKE; c.drawPath(path, p); p.style = Paint.Style.STROKE
+        }
+        p.color = color; p.strokeWidth = s * 0.075f
+        when (kind) {
+            "play" -> tri(0.3f, 0.18f, 0.3f, 0.82f, 0.82f, 0.5f)
+            "pause" -> { p.strokeWidth = s * 0.16f; c.drawLine(X(0.34f), Y(0.22f), X(0.34f), Y(0.78f), p); c.drawLine(X(0.66f), Y(0.22f), X(0.66f), Y(0.78f), p) }
+            "prev" -> { tri(0.82f, 0.2f, 0.82f, 0.8f, 0.32f, 0.5f); p.strokeWidth = s * 0.1f; c.drawLine(X(0.2f), Y(0.2f), X(0.2f), Y(0.8f), p) }
+            "next" -> { tri(0.18f, 0.2f, 0.18f, 0.8f, 0.68f, 0.5f); p.strokeWidth = s * 0.1f; c.drawLine(X(0.8f), Y(0.2f), X(0.8f), Y(0.8f), p) }
+            "shuffle" -> {
+                c.drawLine(X(0.12f), Y(0.28f), X(0.36f), Y(0.28f), p); c.drawLine(X(0.36f), Y(0.28f), X(0.64f), Y(0.72f), p)
+                c.drawLine(X(0.64f), Y(0.72f), X(0.86f), Y(0.72f), p)
+                c.drawLine(X(0.12f), Y(0.72f), X(0.36f), Y(0.72f), p); c.drawLine(X(0.36f), Y(0.72f), X(0.64f), Y(0.28f), p)
+                c.drawLine(X(0.64f), Y(0.28f), X(0.86f), Y(0.28f), p)
+                for (yy in floatArrayOf(0.28f, 0.72f)) { c.drawLine(X(0.74f), Y(yy - 0.12f), X(0.86f), Y(yy), p); c.drawLine(X(0.74f), Y(yy + 0.12f), X(0.86f), Y(yy), p) }
+            }
+            "speaker" -> {
+                tri(0.12f, 0.5f, 0.5f, 0.16f, 0.5f, 0.84f); o.set(X(0.12f), Y(0.36f), X(0.3f), Y(0.64f))
+                p.style = Paint.Style.FILL; c.drawRect(o, p); p.style = Paint.Style.STROKE
+                o.set(X(0.46f), Y(0.26f), X(0.86f), Y(0.74f)); c.drawArc(o, -55f, 110f, false, p)
+            }
+            "note" -> {
+                c.drawCircle(X(0.34f), Y(0.74f), s * 0.13f, p); c.drawLine(X(0.47f), Y(0.74f), X(0.47f), Y(0.16f), p)
+                c.drawLine(X(0.47f), Y(0.16f), X(0.78f), Y(0.26f), p)
+            }
+            "mic" -> {
+                o.set(X(0.38f), Y(0.14f), X(0.62f), Y(0.6f)); c.drawRoundRect(o, s * 0.12f, s * 0.12f, p)
+                o.set(X(0.26f), Y(0.3f), X(0.74f), Y(0.72f)); c.drawArc(o, 0f, 180f, false, p)
+                c.drawLine(X(0.5f), Y(0.72f), X(0.5f), Y(0.86f), p)
+            }
+            "grid" -> for (i in 0..1) for (j in 0..1) {
+                o.set(X(0.18f + i * 0.36f), Y(0.18f + j * 0.36f), X(0.46f + i * 0.36f), Y(0.46f + j * 0.36f))
+                c.drawRoundRect(o, s * 0.06f, s * 0.06f, p)
+            }
+            "pulse" -> {
+                val pts = floatArrayOf(0.1f, 0.55f, 0.32f, 0.55f, 0.42f, 0.25f, 0.58f, 0.8f, 0.68f, 0.5f, 0.9f, 0.5f)
+                for (i in 0 until pts.size - 2 step 2) c.drawLine(X(pts[i]), Y(pts[i + 1]), X(pts[i + 2]), Y(pts[i + 3]), p)
+            }
+            "timer" -> {
+                c.drawCircle(X(0.5f), Y(0.55f), s * 0.32f, p)
+                c.drawLine(X(0.5f), Y(0.55f), X(0.5f), Y(0.38f), p); c.drawLine(X(0.42f), Y(0.12f), X(0.58f), Y(0.12f), p)
+            }
+            "chat" -> {  // speech bubble with a tail at the bottom left
+                path.reset(); path.moveTo(X(0.16f), Y(0.2f)); path.lineTo(X(0.84f), Y(0.2f)); path.lineTo(X(0.84f), Y(0.66f))
+                path.lineTo(X(0.42f), Y(0.66f)); path.lineTo(X(0.16f), Y(0.84f)); path.close(); c.drawPath(path, p)
+            }
+            "list" -> for (yy in floatArrayOf(0.26f, 0.5f, 0.74f)) {
+                c.drawLine(X(0.36f), Y(yy), X(0.86f), Y(yy), p); c.drawLine(X(0.14f), Y(yy), X(0.17f), Y(yy), p)
+            }
+            "sliders" -> {
+                c.drawLine(X(0.14f), Y(0.3f), X(0.86f), Y(0.3f), p); c.drawLine(X(0.14f), Y(0.7f), X(0.86f), Y(0.7f), p)
+                c.drawLine(X(0.62f), Y(0.18f), X(0.62f), Y(0.42f), p); c.drawLine(X(0.38f), Y(0.58f), X(0.38f), Y(0.82f), p)
+            }
+            "box" -> { o.set(X(0.16f), Y(0.16f), X(0.84f), Y(0.84f)); c.drawRoundRect(o, s * 0.12f, s * 0.12f, p) }
+            "check" -> {  // rounded box with a tick
+                o.set(X(0.16f), Y(0.16f), X(0.84f), Y(0.84f)); c.drawRoundRect(o, s * 0.12f, s * 0.12f, p)
+                c.drawLine(X(0.32f), Y(0.52f), X(0.45f), Y(0.65f), p); c.drawLine(X(0.45f), Y(0.65f), X(0.7f), Y(0.36f), p)
+            }
+            "search" -> { c.drawCircle(X(0.43f), Y(0.43f), s * 0.25f, p); c.drawLine(X(0.62f), Y(0.62f), X(0.84f), Y(0.84f), p) }
+            "down", "up" -> {  // git pull / push: an arrow onto (or off) a bar
+                val dn = kind == "down"; val bar = if (dn) 0.86f else 0.14f; val tip = if (dn) 0.66f else 0.34f; val tail = if (dn) 0.14f else 0.86f
+                c.drawLine(X(0.5f), Y(tail), X(0.5f), Y(tip), p)
+                c.drawLine(X(0.28f), Y(tip + if (dn) -0.2f else 0.2f), X(0.5f), Y(tip), p); c.drawLine(X(0.72f), Y(tip + if (dn) -0.2f else 0.2f), X(0.5f), Y(tip), p)
+                c.drawLine(X(0.18f), Y(bar), X(0.82f), Y(bar), p)
+            }
+            "refresh" -> {  // git fetch: an open circle with an arrowhead
+                val o = android.graphics.RectF(X(0.16f), Y(0.16f), X(0.84f), Y(0.84f)); c.drawArc(o, -60f, 300f, false, p)
+                c.drawLine(X(0.67f), Y(0.21f), X(0.84f), Y(0.21f), p); c.drawLine(X(0.67f), Y(0.21f), X(0.67f), Y(0.04f), p)
+            }
+            "send" -> {
+                c.drawLine(X(0.2f), Y(0.5f), X(0.8f), Y(0.5f), p)
+                c.drawLine(X(0.58f), Y(0.28f), X(0.8f), Y(0.5f), p); c.drawLine(X(0.58f), Y(0.72f), X(0.8f), Y(0.5f), p)
+            }
+        }
+    }
+}

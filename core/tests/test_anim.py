@@ -1,12 +1,12 @@
-"""FROSTI's animation spec: seams, sizes, references and mappings. Also runs the controller tests in Node if present."""
+"""FRIDAY's animation spec: seams, sizes, references and mappings. Also runs the controller tests in Node if present."""
 import json, shutil, subprocess, sys, unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "frosti_core" / "anim"))
+sys.path.insert(0, str(ROOT / "friday_core" / "anim"))
 import author  # noqa: E402
-from frosti_core.tools import TOOLS, GIT_TIER  # noqa: E402
+from friday_core.tools import TOOLS, GIT_TIER  # noqa: E402
 
 SPEC = json.loads(author.OUT.read_text(encoding="utf-8"))
 REST = SPEC["rest"]
@@ -102,7 +102,7 @@ class AnimSpec(unittest.TestCase):
         self.assertEqual(unmapped, {"thinking"})
 
     def test_gallery_is_served_on_loopback_only(self):
-        from frosti_core.gateway import console_page
+        from friday_core.gateway import console_page
         class R:
             def __init__(self, host, path): self.headers, self.path = {"Host": host}, path
         class C:
@@ -111,7 +111,7 @@ class AnimSpec(unittest.TestCase):
                 class Resp: pass
                 r = Resp(); r.status, r.body, r.headers = status, text, {"Content-Type": "text/plain"}
                 return r
-        for path, kind in (("/gallery", "text/html"), ("/frosti.js", "javascript"), ("/frosti_anims.json", "json")):
+        for path, kind in (("/gallery", "text/html"), ("/friday.js", "javascript"), ("/friday_anims.json", "json")):
             self.assertEqual(console_page(C("192.168.1.5"), R("127.0.0.1:8765", path)).status, 403)
             ok = console_page(C("127.0.0.1"), R("127.0.0.1:8765", path))
             self.assertEqual(ok.status, 200); self.assertIn(kind, ok.headers["Content-Type"])
@@ -119,7 +119,7 @@ class AnimSpec(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("node"), "Node.js not installed")
     def test_controller_behaviour_in_node(self):
-        r = subprocess.run(["node", "--test", str(Path(__file__).with_name("frosti_controller.test.js"))],
+        r = subprocess.run(["node", "--test", str(Path(__file__).with_name("friday_controller.test.js"))],
                            capture_output=True, text=True, timeout=120)
         self.assertEqual(r.returncode, 0, r.stdout[-4000:] + r.stderr[-2000:])
 

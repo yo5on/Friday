@@ -27,12 +27,12 @@
 
     <!-- cleartext is only used to 127.0.0.1 over `adb reverse` (USB); LAN mode needs TLS first -->
     <application
-        android:label="FROSTI"
+        android:label="FRIDAY"
         android:icon="@android:drawable/sym_def_app_icon"
         android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
         android:usesCleartextTraffic="true"
         android:testOnly="true">
-        <!-- testOnly: keeps `adb shell dpm remove-active-admin com.frosti.shell/.FrostiAdmin` working as an escape hatch from OS mode -->
+        <!-- testOnly: keeps `adb shell dpm remove-active-admin com.friday.shell/.FridayAdmin` working as an escape hatch from OS mode -->
 
         <activity
             android:name=".MainActivity"
@@ -51,13 +51,13 @@
         </activity>
 
         <service
-            android:name=".FrostiService"
+            android:name=".FridayService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
         <service
             android:name=".SplitKeyboard"
-            android:label="FROSTI split keyboard"
+            android:label="FRIDAY split keyboard"
             android:exported="true"
             android:permission="android.permission.BIND_INPUT_METHOD">
             <intent-filter>
@@ -67,7 +67,7 @@
         </service>
 
         <receiver
-            android:name=".FrostiAdmin"
+            android:name=".FridayAdmin"
             android:exported="true"
             android:permission="android.permission.BIND_DEVICE_ADMIN">
             <meta-data android:name="android.app.device_admin" android:resource="@xml/device_admin" />

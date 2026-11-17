@@ -19,7 +19,7 @@ while ($true) {
     '{0,-55} [{1}] {2,3}%  {3,5}/{4,5} MB  {5}' -f $k, $bar, $pct, $mb, $total[$k], $state
   }
   Clear-Host
-  "FROSTI model downloads  $(Get-Date -Format HH:mm:ss)   (Ctrl-C to close)`n"
+  "FRIDAY model downloads  $(Get-Date -Format HH:mm:ss)   (Ctrl-C to close)`n"
   $lines
   Start-Sleep 5
 }

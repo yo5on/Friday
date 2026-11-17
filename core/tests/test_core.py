@@ -2,9 +2,9 @@ import asyncio, base64, json, sqlite3, sys, tempfile, threading, time, unittest
 from unittest import mock
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from frosti_core import router, tools
-from frosti_core.brain import Brain, Session
-from frosti_core.store import Store
+from friday_core import router, tools
+from friday_core.brain import Brain, Session
+from friday_core.store import Store
 
 FAST = [  # utterance -> (tool, args) the fast path must produce
     ("Open Spotify on my phone", ("open_app", {"name": "spotify", "device": "phone"})),
@@ -17,22 +17,22 @@ FAST = [  # utterance -> (tool, args) the fast path must produce
     ("make the screen as bright as possible", ("set_brightness", {"level": 100, "device": "phone"})),
     ("turn the volume down to 20", ("set_volume", {"level": 20})),
     ("mute the phone", ("set_volume", {"level": 0})),
-    (r"open E:\frosti in vs code", ("open_vscode", {"path": r"e:\frosti"})),
-    ("git status for frosti", ("git", {"project": "frosti", "action": "status"})),
-    ("Show me the recent commits in frosti.", ("git", {"project": "frosti", "action": "log"})),
-    ("what's the github status of frosti", ("git", {"project": "frosti", "action": "github"})),
-    ("any open PRs on frosti?", ("git", {"project": "frosti", "action": "github"})),
+    (r"open E:\friday in vs code", ("open_vscode", {"path": r"e:\friday"})),
+    ("git status for friday", ("git", {"project": "friday", "action": "status"})),
+    ("Show me the recent commits in friday.", ("git", {"project": "friday", "action": "log"})),
+    ("what's the github status of friday", ("git", {"project": "friday", "action": "github"})),
+    ("any open PRs on friday?", ("git", {"project": "friday", "action": "github"})),
     (r"what's the github status of E:\Personal-website", ("git", {"project": r"e:\personal-website", "action": "github"})),
-    ("push frosti to github", ("git", {"project": "frosti", "action": "push"})),
-    ("Run the tests for frosti.", ("run_project", {"project": "frosti", "task": "test"})),
-    ("start the frosti dev server", ("run_project", {"project": "frosti", "task": "dev"})),
-    ("build frosti", ("run_project", {"project": "frosti", "task": "build"})),
+    ("push friday to github", ("git", {"project": "friday", "action": "push"})),
+    ("Run the tests for friday.", ("run_project", {"project": "friday", "task": "test"})),
+    ("start the friday dev server", ("run_project", {"project": "friday", "task": "dev"})),
+    ("build friday", ("run_project", {"project": "friday", "task": "build"})),
     ("Set a timer for ten minutes for tea.", ("set_timer", {"minutes": 10, "label": "tea"})),
     ("remind me in half an hour", ("set_timer", {"minutes": 30, "label": ""})),
     ("Remember that I prefer dark themes.", ("remember", {"fact": "i prefer dark themes"})),
     ("what did I tell you about my themes?", ("recall", {"query": "my themes"})),
     ("Kill chrome on the laptop.", ("kill_process", {"name": "chrome"})),
-    ("Hey Frosti, open Spotify.", ("open_app", {"name": "spotify", "device": "phone"})),
+    ("Hey Friday, open Spotify.", ("open_app", {"name": "spotify", "device": "phone"})),
     ("open calculator in laptop", ("open_app", {"name": "calculator", "device": "laptop"})),
     ("open paint on my pc", ("open_app", {"name": "paint", "device": "laptop"})),
     ("Close Word.", ("kill_process", {"name": "word"})),
@@ -65,8 +65,8 @@ FAST = [  # utterance -> (tool, args) the fast path must produce
     ("mark buy milk as done", ("tasks", {"action": "done", "text": "buy milk"})),
     ("what's running on the laptop", ("get_status", {"metric": "processes", "device": "laptop"})),
 ]
-UNMATCHED = ["hey frosti, how are you?", "what is the capital of France?", "list the files in my downloads folder using powershell",
-          "commit frosti with message 'add bench'", "turn off", "switch off it","Good evening, Frosti. How are the systems looking?"]
+UNMATCHED = ["hey friday, how are you?", "what is the capital of France?", "list the files in my downloads folder using powershell",
+          "commit friday with message 'add bench'", "turn off", "switch off it","Good evening, Friday. How are the systems looking?"]
 
 class Router(unittest.TestCase):
     def test_fast_path(self):
@@ -98,7 +98,7 @@ class Apps(unittest.TestCase):
             {"name": "Spotify", "id": "SpotifyAB.Spotify!Spotify", "lnk": None, "exe": ""}]
 
     def test_find_app_fuzzy(self):
-        from frosti_core.tools import find_app
+        from friday_core.tools import find_app
         name = lambda q: (find_app(q, self.APPS) or {}).get("name")
         self.assertEqual(name("word"), "Word")
         self.assertEqual(name("chrome"), "Google Chrome")  # shortest whole-word match
@@ -106,7 +106,7 @@ class Apps(unittest.TestCase):
         self.assertIsNone(name("notepad"))
 
     def test_process_for_friendly_names(self):
-        from frosti_core.tools import process_for
+        from friday_core.tools import process_for
         running = {"winword.exe", "chrome.exe", "calculatorapp.exe", "code.exe", "codehelper.exe"}
         self.assertEqual(process_for("word", running, self.APPS), ["winword.exe"])     # via the shortcut's exe
         self.assertEqual(process_for("chrome.exe", running, self.APPS), ["chrome.exe"])
@@ -122,7 +122,7 @@ class Apps(unittest.TestCase):
     def test_start_apps_answers_from_saved_list(self):
         import tempfile, subprocess
         from pathlib import Path
-        from frosti_core import tools
+        from friday_core import tools
         saved = [{"name": "Spotify", "id": "s", "lnk": None, "exe": ""}]
         with tempfile.TemporaryDirectory() as d:
             f = Path(d) / "apps.json"; f.write_text(json.dumps(saved), encoding="utf-8")
@@ -142,7 +142,7 @@ class Apps(unittest.TestCase):
             self.assertEqual(json.loads((Path(d) / "none.json").read_text())[0]["name"], "Notepad")
 
     def test_media_control_uses_session_then_key(self):
-        from frosti_core import tools
+        from friday_core import tools
         for session, pressed in ((mock.AsyncMock(return_value=None), False), (mock.AsyncMock(return_value=False), True),
                                  (mock.AsyncMock(side_effect=ImportError), True)):  # ok / no session / no winrt
             with mock.patch.object(tools, "media_session", session), mock.patch.object(tools.ctypes, "windll") as w:
@@ -150,12 +150,12 @@ class Apps(unittest.TestCase):
             self.assertEqual(w.user32.keybd_event.called, pressed)
 
     def test_open_app_keeps_trust_boundary(self):
-        from frosti_core.tools import open_app
+        from friday_core.tools import open_app
         self.assertIn("unsafe", open_app("calc & del x")[0])
 
 class KeepAwake(unittest.TestCase):
     def setUp(self):
-        from frosti_core import tools
+        from friday_core import tools
         self.tools = tools
         state = mock.patch.dict(tools._awake, stop=None)
         state.start(); self.addCleanup(state.stop)
@@ -246,7 +246,7 @@ class BrainPolicy(unittest.TestCase):
         self.assertEqual(r["reply"], "Okay, cancelled.")
 
     def test_kill_confirmation_says_how_many(self):
-        from frosti_core import tools
+        from friday_core import tools
         procs = [mock.Mock(info={"name": "chatgpt.exe"})] * 3
         with mock.patch.object(tools, "kill_target", return_value=([], "chatgpt.exe")), \
              mock.patch.object(tools.psutil, "process_iter", return_value=procs):
@@ -256,7 +256,7 @@ class BrainPolicy(unittest.TestCase):
             self.assertEqual(tools.kill_preview("x"), "Kill process x")  # ambiguous: no count
 
     def test_spotify_plays_track_with_preview(self):
-        from frosti_core import tools
+        from friday_core import tools
         track = {"name": "Believer", "uri": "spotify:track:abc", "artists": [{"name": "Imagine Dragons"}],
                  "album": {"name": "Evolve", "images": [{"url": "big"}, {"url": "mid"}]}}
         opened = []
@@ -273,7 +273,7 @@ class BrainPolicy(unittest.TestCase):
                                       "art": "data:image/jpeg;base64,anBn", "app": "Spotify"})
 
     def test_spotify_error_falls_back_to_search(self):
-        from frosti_core import tools
+        from friday_core import tools
         opened = []
         with mock.patch.object(tools, "start_apps", return_value=[{"name": "Spotify"}]), \
              mock.patch.object(tools, "spotify_track", side_effect=OSError("offline")), \
@@ -288,7 +288,7 @@ class BrainPolicy(unittest.TestCase):
         self.assertIn("couldn't press play", r["reply"])
 
     def test_spotify_search_lists_playable_tracks(self):
-        from frosti_core import tools
+        from friday_core import tools
         track = {"name": "Believer", "uri": "spotify:track:abc", "artists": [{"name": "Imagine Dragons"}],
                  "album": {"name": "Evolve", "images": [{"url": "big"}, {"url": "mid"}, {"url": "small"}]}}
         with mock.patch.object(tools, "spotify_search", return_value=[track, track]) as search, \
@@ -300,7 +300,7 @@ class BrainPolicy(unittest.TestCase):
                                                  "art": "data:image/jpeg;base64,anBn", "uri": "spotify:track:abc"}] * 2)
 
     def test_song_search_without_spotify_keys_uses_itunes(self):
-        from frosti_core import tools
+        from friday_core import tools
         found = json.dumps({"results": [{"trackName": "Punchiri", "artistName": "Eechuu/AC, Suhas & Chris", "collectionName": "Punchiri - Single",
                                          "artworkUrl60": "small"}]}).encode()
         with mock.patch.object(tools, "spotify_search", return_value=None), \
@@ -338,7 +338,7 @@ class BrainPolicy(unittest.TestCase):
 
     def test_open_app_falls_back_to_laptop_unless_phone_named(self):
         from unittest import mock
-        from frosti_core.tools import TOOLS
+        from friday_core.tools import TOOLS
         with mock.patch.object(TOOLS["open_app"], "run", lambda name, device: (f"Opening {name}.", "")):
             r, _ = self.run_("open notepad")  # no phone connected in this test
             self.assertEqual((r["reply"], r["args"]["device"]), ("Opening notepad.", "laptop"))
@@ -360,7 +360,7 @@ class Dashboards(unittest.TestCase):
         self.brain = Brain(self.store)
 
     def test_memory_lists_and_forgets_facts(self):
-        from frosti_core.gateway import memory
+        from friday_core.gateway import memory
         self.store.remember("I like tea"); self.store.remember("my cat is Io")
         facts = memory(self.brain)["facts"]
         self.assertEqual({f["fact"] for f in facts}, {"I like tea", "my cat is Io"})
@@ -379,7 +379,7 @@ class Dashboards(unittest.TestCase):
         self.store.audit("desk", "open_app", {"name": "youtube", "device": "phone"}, 1, True, "Opening YouTube.")
         self.assertEqual(self.store.top_apps(), [dict(label="Notepad", cmd="open notepad on the laptop"),
                                                  dict(label="YouTube", cmd="open youtube on the phone")])
-        from frosti_core import router
+        from friday_core import router
         self.assertEqual(router.match("open notepad on the laptop"), ("open_app", {"name": "notepad", "device": "laptop"}))
 
     def test_timers_survive_a_restart(self):
@@ -419,13 +419,13 @@ class Dashboards(unittest.TestCase):
         self.assertFalse(log[0]["approved"])
 
     def test_stats_shape(self):
-        from frosti_core.gateway import stats
+        from friday_core.gateway import stats
         s = stats(self.brain)
         for k in ("cpu", "ram", "top", "voice", "phone", "uptime"):
             self.assertIn(k, s)
 
     def test_console_page_is_loopback_only(self):
-        from frosti_core.gateway import console_page
+        from friday_core.gateway import console_page
         class R:
             def __init__(self, host, path="/"): self.headers, self.path = {"Host": host}, path
         class C:
@@ -439,12 +439,12 @@ class Dashboards(unittest.TestCase):
         self.assertEqual(console_page(C("127.0.0.1"), R("evil.example:8765")).status, 403)  # DNS rebinding
         ok = console_page(C("127.0.0.1"), R("127.0.0.1:8765"))
         self.assertEqual(ok.status, 200)
-        self.assertNotIn("__FROSTI_TOKEN__", ok.body)
+        self.assertNotIn("__FRIDAY_TOKEN__", ok.body)
         self.assertIn("text/html", ok.headers["Content-Type"])
 
 class NowPlayingPush(unittest.TestCase):
     def test_pushes_only_changes(self):
-        from frosti_core import gateway
+        from friday_core import gateway
         track = dict(title="Song", artist="A", album="", art=None, app="Spotify", playing=True)
         reads = iter([track, track, {**track, "playing": False}, None])
         async def fake():
@@ -464,7 +464,7 @@ class NowPlayingPush(unittest.TestCase):
         self.assertEqual(got, [track, {**track, "playing": False}, None])
 
     def test_position_pushes_only_on_seek(self):
-        from frosti_core import gateway
+        from friday_core import gateway
         t = dict(title="Song", artist="A", album="", art=None, app="Spotify", playing=False, length=200, shuffle=None)
         reads = iter([{**t, "position": 10}, {**t, "position": 11}, {**t, "position": 60}, {**t, "position": 61}])
         async def fake():
@@ -518,7 +518,7 @@ class NowPlayingPush(unittest.TestCase):
             asyncio.run(run())
 
     def test_hung_read_does_not_freeze_the_feed(self):
-        from frosti_core import gateway
+        from friday_core import gateway
         async def stubborn():  # like a WinRT call that ignores cancel: wait_for would sit here 10 s
             try:
                 await asyncio.sleep(10)
@@ -534,7 +534,7 @@ class NowPlayingPush(unittest.TestCase):
 class DroppedReply(unittest.TestCase):
     def test_reply_kept_when_phone_drops_and_sent_on_reconnect(self):
         import websockets
-        from frosti_core.gateway import PhoneSession
+        from friday_core.gateway import PhoneSession
         r = dict(reply="It's 5 pm.", detail="", tool="time", path="fast", seconds=0.1)
         class Dropped:
             async def send(self, m): raise websockets.ConnectionClosed(None, None)

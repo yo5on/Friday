@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from frosti_core.gateway import PhoneSession
+from friday_core.gateway import PhoneSession
 
 
 class WakeReply(unittest.IsolatedAsyncioTestCase):

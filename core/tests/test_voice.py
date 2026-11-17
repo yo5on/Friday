@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from frosti_core import CONFIG
+from friday_core import CONFIG
 
 SPEEDS = (0.9, 0.95, 1.0, 1.05, 1.1)  # Piper varies run to run anyway; speeds spread the takes further
 
@@ -13,7 +13,7 @@ SPEEDS = (0.9, 0.95, 1.0, 1.05, 1.1)  # Piper varies run to run anyway; speeds s
 class WakeWord(unittest.TestCase):
     def test_name_and_greeting_wake_but_unrelated_speech_does_not(self):
         import numpy as np
-        from frosti_core.voice import Voice, Listener, SR
+        from friday_core.voice import Voice, Listener, SR
         voice = Voice()
 
         def wakes(text, speed):
@@ -29,9 +29,9 @@ class WakeWord(unittest.TestCase):
                     return True
             return False
 
-        # measured 2026-11-13 on Piper alan: "Hey Frosti" wakes on most takes, the bare name on only ~2/3,
+        # measured 2026-11-13 on Piper alan: "Hey Friday" wakes on most takes, the bare name on only ~2/3,
         # so a single take is a coin flip; these minimums still fail if the detector stops hearing the name
-        for text, minimum in [('Hey Frosti.', 3), ('Frosti.', 1),
+        for text, minimum in [('Hey Friday.', 3), ('Friday.', 1),
                               ('Open Spotify on my phone.', 0), ('Hey Siri.', 0)]:
             with self.subTest(text=text):
                 hits = sum(wakes(text, s) for s in SPEEDS)

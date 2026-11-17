@@ -1,4 +1,4 @@
-# Downloads FROSTI's Phase 0 candidate models to D:\frosti-models, smallest/most-needed first.
+# Downloads FRIDAY's Phase 0 candidate models to D:\frosti-models, smallest/most-needed first.
 # Resumable: re-run any time; finished files are skipped, partial ones continue.
 # Stalls (<5 KB/s for 60 s) abort the transfer and the loop resumes it.
 param([string]$Root = 'D:\frosti-models')

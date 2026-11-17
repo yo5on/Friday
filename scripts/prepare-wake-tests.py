@@ -6,8 +6,8 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'core'))
 import sherpa_onnx
-from frosti_core import CONFIG
-from frosti_core.voice import Voice, SR, _one
+from friday_core import CONFIG
+from friday_core.voice import Voice, SR, _one
 
 voice = Voice()
 v = Path(CONFIG['speech']['models']) / CONFIG['speech']['voice']
@@ -17,7 +17,7 @@ if not (v / 'voices.bin').exists():  # Piper/VITS samples random noise; zero it 
                                                    data_dir=str(v / 'espeak-ng-data'), noise_scale=0.0, noise_scale_w=0.0))))
 directory = ROOT / 'data' / 'wake-tests'
 directory.mkdir(exist_ok=True)
-for name, text in [('frosti', 'Frosti.'), ('hey-frosti', 'Hey Frosti.'),
+for name, text in [('friday', 'Friday.'), ('hey-friday', 'Hey Friday.'),
                    ('unrelated', 'Open Spotify on my phone.'), ('other-name', 'Hey Siri.'),
                    ('cmd-battery', "What's my battery?"), ('cmd-youtube', 'Open YouTube.'),
                    ('cmd-volume', 'Volume up.'), ('cmd-timer-five', 'Five minute timer.'),

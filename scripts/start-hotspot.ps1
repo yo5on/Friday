@@ -30,7 +30,7 @@ $core = $null
 try {
     # Start the Core before the hotspot: the laptop console must work even when the access point is stuck.
     if (-not $HotspotOnly) {
-        $core = Start-Process -FilePath $settings.python -ArgumentList '-m', 'frosti_core' -WorkingDirectory (Join-Path $root 'core') -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $root 'data/core.log') -RedirectStandardError (Join-Path $root 'data/core-error.log')
+        $core = Start-Process -FilePath $settings.python -ArgumentList '-m', 'friday_core' -WorkingDirectory (Join-Path $root 'core') -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $root 'data/core.log') -RedirectStandardError (Join-Path $root 'data/core-error.log')
     }
     # Wi-Fi can come up late after boot: keep trying instead of giving up.
     Restart-Hotspot  # Start() throws while Wi-Fi is still off; the loop below retries
@@ -41,7 +41,7 @@ try {
             Restart-Hotspot
         }
     }
-    Log "FROSTI hotspot running: $($settings.ssid)"
+    Log "FRIDAY hotspot running: $($settings.ssid)"
     $down = 0
     while ($HotspotOnly -or -not $core.HasExited) {
         Start-Sleep -Seconds 3
