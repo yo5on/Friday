@@ -29,8 +29,8 @@ class WakeWord(unittest.TestCase):
                     return True
             return False
 
-        # measured 2026-11-13 on Piper alan: "Hey Friday" wakes on most takes, the bare name on only ~2/3,
-        # so a single take is a coin flip; these minimums still fail if the detector stops hearing the name
+        # measured 2026-11-17 on Piper alan: "Friday" and "Hey Friday" wake on 7/7 takes; "Fried eggs" also wakes
+        # (sounds alike, no threshold fixes it). Minimums stay loose so a take that varies does not flake
         for text, minimum in [('Hey Friday.', 3), ('Friday.', 1),
                               ('Open Spotify on my phone.', 0), ('Hey Siri.', 0)]:
             with self.subTest(text=text):
